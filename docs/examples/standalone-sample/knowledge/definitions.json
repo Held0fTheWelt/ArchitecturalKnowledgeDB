@@ -1,0 +1,7 @@
+[
+  {
+    "term": "Project reality",
+    "canonical_meaning": "The currently observable source, document, and diagram state, even when it differs from older architecture decisions.",
+    "examples": ["README content", "current UML diagrams", "source area ownership"]
+  }
+]

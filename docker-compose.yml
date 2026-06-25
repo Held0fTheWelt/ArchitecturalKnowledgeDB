@@ -1,0 +1,14 @@
+services:
+  architectural-knowledge-db:
+    build: .
+    ports:
+      - "8787:8787"
+    environment:
+      AKDB_DATA_ROOT: /data
+      AKDB_DATABASE_PATH: /data/architectural_knowledge_db.sqlite
+    volumes:
+      - akdb-data:/data
+      - ./docs:/sources/architectural-knowledge-db:ro
+
+volumes:
+  akdb-data:

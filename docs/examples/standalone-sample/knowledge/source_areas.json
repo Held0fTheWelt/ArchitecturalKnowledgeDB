@@ -1,0 +1,8 @@
+[
+  {
+    "source_area_id": "standalone-sample-docs",
+    "title": "Standalone sample documents",
+    "path_patterns": ["docs/examples/standalone-sample/docs/**"],
+    "description": "Narrative project reality used to test document imports."
+  }
+]

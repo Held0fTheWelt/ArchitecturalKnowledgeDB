@@ -1,0 +1,9 @@
+[
+  {
+    "rule_id": "RULE-STANDALONE-001",
+    "title": "Samples stay portable",
+    "severity": "normal",
+    "rule_text": "Samples must not depend on private repository paths.",
+    "applies_to": ["docs/examples/standalone-sample/**"]
+  }
+]

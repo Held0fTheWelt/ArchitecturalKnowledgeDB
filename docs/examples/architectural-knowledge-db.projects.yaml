@@ -1,0 +1,75 @@
+version: 1
+
+data_root: /data
+
+default_query_policy:
+  require_project_id: true
+  include_imported_shared_spaces: true
+  allow_global_search: false
+
+git_policy:
+  store_author_email_hash: false
+  store_raw_diffs: false
+  sanitize_remote_urls: true
+  read_only: true
+
+shared_spaces:
+  - id: shared.agent-rules
+    display_name: Shared Agent Rules
+  - id: shared.architecture-terms
+    display_name: Shared Architecture Terms
+  - id: shared.uml-conventions
+    display_name: Shared UML Conventions
+
+projects:
+  - id: architectural-knowledge-db
+    display_name: ArchitecturalKnowledgeDB Knowledge Service
+    imports:
+      - shared.agent-rules
+      - shared.architecture-terms
+    repositories:
+      - id: architectural-knowledge-db-main
+        local_path: /sources/architectural-knowledge-db
+        default_branch: main
+        scan_policy: manual
+        include_patterns:
+          - docs/**
+          - app/**
+          - schema/**
+          - contracts/**
+        exclude_patterns:
+          - .venv/**
+          - node_modules/**
+          - data/**
+  - id: uml-editor
+    display_name: UML Editor with AI Co-Author
+    imports:
+      - shared.agent-rules
+      - shared.uml-conventions
+      - shared.architecture-terms
+    repositories:
+      - id: uml-editor-main
+        local_path: /sources/uml-editor
+        default_branch: main
+        scan_policy: manual
+        include_patterns:
+          - docs/**
+          - models/**
+          - src/**
+        exclude_patterns:
+          - node_modules/**
+          - dist/**
+  - id: world-engine
+    display_name: World Engine
+    imports:
+      - shared.agent-rules
+    repositories:
+      - id: world-engine-main
+        local_path: /sources/world-engine
+        default_branch: main
+        scan_policy: manual
+        include_patterns:
+          - docs/ADR/**
+          - ai_stack/**
+          - world-engine/app/**
+          - tests/**

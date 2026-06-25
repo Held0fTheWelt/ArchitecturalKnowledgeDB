@@ -1,0 +1,85 @@
+from __future__ import annotations
+
+import io
+import json
+from pathlib import Path
+
+from architectural_knowledge_db.db.connection import initialize_database
+from architectural_knowledge_db.models import AdrInput, ProjectUpsert
+from architectural_knowledge_db.services.knowledge import KnowledgeService
+from architectural_knowledge_db.services.projects import ProjectService
+from architectural_knowledge_db.mcp_stdio import StdioServer, serve
+
+
+def _seed(tmp_path: Path):
+    conn = initialize_database(tmp_path / "mcp.sqlite")
+    ProjectService(conn).upsert_project(ProjectUpsert(project_id="p", display_name="P"))
+    KnowledgeService(conn).upsert_adr(
+        "p",
+        AdrInput(adr_id="ADR-0001", title="SQLite first", status="accepted",
+                 decision_md="SQLite is the primary local state."),
+    )
+    conn.commit()
+    return conn
+
+
+def test_initialize_lists_tools_and_calls_search(tmp_path):
+    server = StdioServer(_seed(tmp_path), default_project="p")
+
+    init = server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                          "params": {"protocolVersion": "2025-06-18"}})
+    assert init["result"]["serverInfo"]["name"] == "akdb"
+    assert "tools" in init["result"]["capabilities"]
+    assert init["result"]["protocolVersion"] == "2025-06-18"
+
+    listed = server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+    tools = listed["result"]["tools"]
+    assert any(t["name"] == "architectural_knowledge_db_search" for t in tools)
+    assert all("inputSchema" in t for t in tools)
+
+    called = server.handle({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                            "params": {"name": "architectural_knowledge_db_search",
+                                       "arguments": {"query": "SQLite"}}})
+    assert "ADR-0001" in called["result"]["content"][0]["text"]
+
+
+def test_notification_returns_none(tmp_path):
+    server = StdioServer(_seed(tmp_path), default_project="p")
+    assert server.handle({"jsonrpc": "2.0", "method": "notifications/initialized"}) is None
+
+
+def test_unknown_method_is_jsonrpc_error(tmp_path):
+    server = StdioServer(_seed(tmp_path))
+    resp = server.handle({"jsonrpc": "2.0", "id": 9, "method": "no/such"})
+    assert resp["error"]["code"] == -32601
+
+
+def test_tool_error_is_returned_as_iserror(tmp_path):
+    server = StdioServer(_seed(tmp_path), default_project="p")
+    resp = server.handle({"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+                          "params": {"name": "does_not_exist", "arguments": {}}})
+    assert resp["result"]["isError"] is True
+
+
+def test_default_project_is_injected(tmp_path):
+    server = StdioServer(_seed(tmp_path), default_project="p")
+    resp = server.handle({"jsonrpc": "2.0", "id": 5, "method": "tools/call",
+                          "params": {"name": "architectural_knowledge_db_search",
+                                     "arguments": {"query": "SQLite"}}})  # no project_id supplied
+    assert "isError" not in resp["result"]
+
+
+def test_serve_loop_emits_one_line_per_request(tmp_path):
+    conn = _seed(tmp_path)
+    stdin = io.StringIO(
+        json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}) + "\n"
+        + json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n"
+        + json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}) + "\n"
+    )
+    stdout = io.StringIO()
+    serve(stdin, stdout, conn, default_project="p")
+    lines = [l for l in stdout.getvalue().splitlines() if l.strip()]
+    assert len(lines) == 2  # initialize + tools/list; notification produced no line
+    assert json.loads(lines[0])["result"]["serverInfo"]["name"] == "akdb"
+    assert any(t["name"] == "architectural_knowledge_db_search"
+               for t in json.loads(lines[1])["result"]["tools"])

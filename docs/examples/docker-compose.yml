@@ -1,0 +1,18 @@
+services:
+  architectural-knowledge-db:
+    build: ..
+    container_name: architectural-knowledge-db
+    ports:
+      - "8787:8787"
+    environment:
+      ARCHITECTURAL_KNOWLEDGE_DB_DATA_ROOT: /data
+      ARCHITECTURAL_KNOWLEDGE_DB_CONFIG: /config/architectural-knowledge-db.projects.yaml
+      ARCHITECTURAL_KNOWLEDGE_DB_WRITE_MODE: "false"
+      ARCHITECTURAL_KNOWLEDGE_DB_GIT_READ_ONLY: "true"
+    volumes:
+      - ./data:/data
+      - ./architectural-knowledge-db.projects.yaml:/config/architectural-knowledge-db.projects.yaml:ro
+      - D:/Projects/ArchitecturalKnowledgeDB:/sources/architectural-knowledge-db:ro
+      - D:/Projects/UmlEditor:/sources/uml-editor:ro
+      - D:/Projects/WorldEngine:/sources/world-engine:ro
+    restart: unless-stopped

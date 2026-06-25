@@ -1,0 +1,13 @@
+plugin:
+  required_diagrams: [c4-context, c4-container, c4-component, sequence, "state|activity"]
+  file_map: required
+  blocking: [required_diagrams, file_map]
+function:
+  required_diagrams: [c4-component, sequence]
+  file_map: required
+  blocking: [required_diagrams, file_map]
+rule:
+  required_diagrams: [activity]
+  requires: [applies_to, forbidden_changes]
+  file_map: required
+  blocking: [required_diagrams, requires]

@@ -1,0 +1,19 @@
+@startuml
+title {{project_name}} Architecture Knowledge Context
+skinparam componentStyle rectangle
+skinparam shadowing false
+
+component "{{project_name}}" as System
+component "Architecture Specs" as Specs
+component "ADR Files" as ADR
+component "UML Diagrams" as UML
+component "ArchitecturalKnowledgeDB" as AKDB
+database "SQLite Knowledge DB" as DB
+
+System --> Specs : documents boundaries
+Specs --> ADR : informs decisions
+ADR --> AKDB : imported as accepted decisions
+UML --> AKDB : imported as current models
+AKDB --> DB : stores searchable knowledge
+AKDB --> System : context packs for changes
+@enduml
