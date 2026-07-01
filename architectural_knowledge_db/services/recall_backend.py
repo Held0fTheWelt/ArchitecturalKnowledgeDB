@@ -124,9 +124,10 @@ class VectorBackend:
 class LLMStoreEmbeddingClient:
     """Live embedding client — POSTs to the LLMStore/IIS bridge. Constructed lazily, only when configured."""
 
-    def __init__(self, url: str, model: str = "default"):
+    def __init__(self, url: str, model: str = "default", token: str | None = None):
         self.url = url
         self.model = model
+        self.token = token
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         import json
@@ -134,9 +135,12 @@ class LLMStoreEmbeddingClient:
         import urllib.request
 
         payload = json.dumps({"model": self.model, "input": texts}).encode("utf-8")
-        request = urllib.request.Request(
-            self.url, data=payload, headers={"Content-Type": "application/json"}
-        )
+        headers = {"Content-Type": "application/json"}
+        if self.token:
+            # A UCM/UMCP route (a valid AKDB_EMBED_URL target per the SAD) requires
+            # a Bearer session token; omitted when unset so the local case stays token-free.
+            headers["Authorization"] = f"Bearer {self.token}"
+        request = urllib.request.Request(self.url, data=payload, headers=headers)
         try:
             with urllib.request.urlopen(request, timeout=30) as response:
                 data = json.loads(response.read().decode("utf-8"))

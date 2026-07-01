@@ -825,7 +825,8 @@ def _backend_from_env(conn: sqlite3.Connection):
     url = os.environ.get("AKDB_EMBED_URL")
     if mode in {"vector", "hybrid"} and url:
         model = os.environ.get("AKDB_EMBED_MODEL", "default")
-        return VectorBackend(conn, LLMStoreEmbeddingClient(url, model), model=model)
+        token = os.environ.get("AKDB_EMBED_TOKEN")
+        return VectorBackend(conn, LLMStoreEmbeddingClient(url, model, token=token), model=model)
     return None
 
 
