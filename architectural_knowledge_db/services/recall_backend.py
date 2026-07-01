@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import math
 import sqlite3
 import struct
@@ -70,26 +71,47 @@ class VectorBackend:
         text = " ".join(part for part in (row["title"], row["summary"]) if part)
         return text or row["item_uid"]
 
-    def embed_project(self, project_id: str) -> dict[str, Any]:
+    def embed_project(
+        self, project_id: str, *, force: bool = False, batch_size: int = 64
+    ) -> dict[str, Any]:
         rows = self.conn.execute(
             "SELECT item_uid, title, summary FROM knowledge_items WHERE project_id = ? ORDER BY item_uid",
             (project_id,),
         ).fetchall()
-        embedded = 0
+        existing = {
+            row["item_uid"]: row["content_hash"]
+            for row in self.conn.execute(
+                "SELECT item_uid, content_hash FROM item_embeddings WHERE model = ?", (self.model,)
+            ).fetchall()
+        }
+        # Embed only items whose text is new or changed (unless forced), so a
+        # re-run does not re-embed the whole corpus one HTTP call at a time.
+        pending: list[tuple[sqlite3.Row, str, str]] = []
         for row in rows:
-            vector = self.client.embed([self._text_for(row)])[0]
-            blob = struct.pack(f"{len(vector)}f", *vector)
-            self.conn.execute(
-                """
-                INSERT INTO item_embeddings(item_uid, model, dim, vector)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(item_uid) DO UPDATE SET
-                  model = excluded.model, dim = excluded.dim, vector = excluded.vector
-                """,
-                (row["item_uid"], self.model, len(vector), blob),
-            )
-            embedded += 1
-        return {"project_id": project_id, "embedded": embedded}
+            text = self._text_for(row)
+            content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+            if not force and existing.get(row["item_uid"]) == content_hash:
+                continue
+            pending.append((row, text, content_hash))
+        skipped = len(rows) - len(pending)
+        embedded = 0
+        for start in range(0, len(pending), batch_size):
+            chunk = pending[start : start + batch_size]
+            vectors = self.client.embed([text for _, text, _ in chunk])
+            for (row, _text, content_hash), vector in zip(chunk, vectors):
+                blob = struct.pack(f"{len(vector)}f", *vector)
+                self.conn.execute(
+                    """
+                    INSERT INTO item_embeddings(item_uid, model, dim, vector, content_hash)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(item_uid) DO UPDATE SET
+                      model = excluded.model, dim = excluded.dim,
+                      vector = excluded.vector, content_hash = excluded.content_hash
+                    """,
+                    (row["item_uid"], self.model, len(vector), blob, content_hash),
+                )
+                embedded += 1
+        return {"project_id": project_id, "embedded": embedded, "skipped": skipped}
 
     def resolve(
         self, project_id: str, query: str, spaces: list[str] | None, limit: int

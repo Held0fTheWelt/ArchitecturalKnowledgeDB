@@ -113,3 +113,101 @@ def test_backend_from_env_passes_token(conn, monkeypatch):
     backend = _backend_from_env(conn)
     assert backend is not None
     assert backend.client.token == "env-tok"
+
+
+class _RecordingEmbed:
+    """Records the length of each embed() call so batching can be observed."""
+
+    def __init__(self):
+        self.calls: list[int] = []
+
+    def embed(self, texts):
+        self.calls.append(len(texts))
+        return [[1.0, 0.0] for _ in texts]
+
+
+def _add_adrs(conn, n):
+    from architectural_knowledge_db.models import AdrInput
+    from architectural_knowledge_db.services.knowledge import KnowledgeService
+
+    ks = KnowledgeService(conn)
+    return [ks.upsert_adr("p", AdrInput(adr_id=f"A{i}", title=f"topic {i}"))["item_uid"] for i in range(n)]
+
+
+def test_embed_project_batches_requests(conn):
+    """embed_project must batch items into few requests, not one HTTP call per item."""
+    from architectural_knowledge_db.services.recall_backend import VectorBackend
+
+    add_project(conn, "p")
+    _add_adrs(conn, 3)
+    stub = _RecordingEmbed()
+    VectorBackend(conn, stub, model="m").embed_project("p")
+    assert stub.calls == [3]  # one batched request for 3 items, not [1, 1, 1]
+
+
+def test_embed_project_skips_unchanged(conn):
+    """A re-run must skip items already embedded for the current model."""
+    from architectural_knowledge_db.services.recall_backend import VectorBackend
+
+    add_project(conn, "p")
+    _add_adrs(conn, 2)
+    stub = _RecordingEmbed()
+    vb = VectorBackend(conn, stub, model="m")
+    assert vb.embed_project("p")["embedded"] == 2
+
+    second = vb.embed_project("p")
+    assert second["embedded"] == 0   # nothing changed → nothing re-embedded
+    assert second["skipped"] == 2
+    assert stub.calls == [2]          # only the first run issued a request
+
+
+def test_embed_project_reembeds_changed_content(conn):
+    """Skip must be content-aware: a changed title/summary re-embeds the item."""
+    from architectural_knowledge_db.models import AdrInput
+    from architectural_knowledge_db.services.knowledge import KnowledgeService
+    from architectural_knowledge_db.services.recall_backend import VectorBackend
+
+    add_project(conn, "p")
+    ks = KnowledgeService(conn)
+    ks.upsert_adr("p", AdrInput(adr_id="A", title="original title"))
+    vb = VectorBackend(conn, _RecordingEmbed(), model="m")
+    assert vb.embed_project("p")["embedded"] == 1
+
+    ks.upsert_adr("p", AdrInput(adr_id="A", title="rewritten title"))  # same item, new content
+    second = vb.embed_project("p")
+    assert second["embedded"] == 1   # content changed → re-embedded, not skipped
+
+
+def test_embed_project_force_reembeds_everything(conn):
+    """force=True bypasses the skip and re-embeds all items."""
+    from architectural_knowledge_db.services.recall_backend import VectorBackend
+
+    add_project(conn, "p")
+    _add_adrs(conn, 2)
+    vb = VectorBackend(conn, _RecordingEmbed(), model="m")
+    assert vb.embed_project("p")["embedded"] == 2
+
+    forced = vb.embed_project("p", force=True)
+    assert forced["embedded"] == 2   # unchanged, but force re-embeds
+    assert forced["skipped"] == 0
+
+
+def test_mcp_embed_project_forwards_force_and_reports_skipped(conn):
+    """The MCP tool forwards force to the backend and surfaces the skipped count."""
+    from architectural_knowledge_db.mcp import McpDispatcher
+
+    class _StubBackend:
+        def __init__(self):
+            self.last = None
+
+        def embed_project(self, project_id, *, force=False, batch_size=64):
+            self.last = {"project_id": project_id, "force": force}
+            return {"project_id": project_id, "embedded": 3, "skipped": 5}
+
+    add_project(conn, "p")
+    backend = _StubBackend()
+    out = McpDispatcher(conn, backend=backend).dispatch(
+        "akdb_embed_project", {"project_id": "p", "force": True}
+    )
+    assert backend.last == {"project_id": "p", "force": True}
+    assert out == {"embedded": 3, "skipped": 5, "backend": "vector"}

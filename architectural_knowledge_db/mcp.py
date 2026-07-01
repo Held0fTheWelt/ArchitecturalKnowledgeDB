@@ -766,11 +766,18 @@ MCP_MANIFEST: dict[str, Any] = {
         },
         {
             "name": "akdb_embed_project",
-            "description": "Build semantic embeddings for a project's items (needs a configured vector backend). No-ops with backend='none' when AKDB_RECALL_BACKEND/AKDB_EMBED_URL are unset; recall stays FTS.",
+            "description": "Build semantic embeddings for a project's items (needs a configured vector backend). Incremental: only new/changed items are embedded (batched), unchanged ones are skipped; pass force=true to re-embed all. No-ops with backend='none' when AKDB_RECALL_BACKEND/AKDB_EMBED_URL are unset; recall stays FTS.",
             "input_schema": {
                 "type": "object",
                 "required": ["project_id"],
-                "properties": {"project_id": {"type": "string"}},
+                "properties": {
+                    "project_id": {"type": "string"},
+                    "force": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Re-embed every item, ignoring the unchanged-content skip.",
+                    },
+                },
             },
         },
         {
@@ -1015,8 +1022,14 @@ class McpDispatcher:
         if tool_name == "akdb_embed_project":
             if self.backend is None:
                 return {"embedded": 0, "backend": "none"}
-            result = self.backend.embed_project(arguments["project_id"])
-            return {"embedded": result["embedded"], "backend": "vector"}
+            result = self.backend.embed_project(
+                arguments["project_id"], force=bool(arguments.get("force", False))
+            )
+            return {
+                "embedded": result["embedded"],
+                "skipped": result.get("skipped", 0),
+                "backend": "vector",
+            }
         if tool_name == "akdb_explore":
             return CognitionService(self.conn).explore(
                 arguments["project_id"], ExploreRequest(**_without_project(arguments))
