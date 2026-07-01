@@ -95,7 +95,11 @@ class VectorBackend:
         self, project_id: str, query: str, spaces: list[str] | None, limit: int
     ) -> list[tuple[str, float]]:
         query_vector = self.client.embed([query])[0]
-        params: list[Any] = [project_id]
+        # Only rank against embeddings from the currently-configured model:
+        # a cross-space union or a model switch can leave foreign-model vectors
+        # in the table, and cosine across different embedding spaces (or a dim
+        # mismatch, which silently scores 0.0) is meaningless.
+        params: list[Any] = [project_id, self.model]
         space_clause = ""
         if spaces:
             space_clause = f"AND ki.space_id IN ({','.join('?' for _ in spaces)})"
@@ -105,7 +109,7 @@ class VectorBackend:
             SELECT e.item_uid, e.dim, e.vector
             FROM item_embeddings e
             JOIN knowledge_items ki ON ki.item_uid = e.item_uid
-            WHERE ki.project_id = ? {space_clause}
+            WHERE ki.project_id = ? AND e.model = ? {space_clause}
             """,
             params,
         ).fetchall()
