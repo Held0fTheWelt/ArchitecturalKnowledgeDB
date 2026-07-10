@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from architectural_knowledge_db.ids import digest_uid, stable_uid
@@ -59,20 +59,23 @@ class UMLService:
             if is_template_or_include_path(source_key):
                 skipped.append(source_key)
                 continue
-            text = path.read_text(encoding="utf-8")
+            text = _read_text_exact(path)
             if path.suffix.lower() in {".mmd", ".mermaid"}:
                 parsed = parse_mermaid(text, source_uri=str(path), source_key=source_key)
             else:
                 parsed = parse_plantuml(text, source_uri=str(path), source_key=source_key)
             parsed["model"]["repo_source_key"] = repo_relative_key(path)
             imported.append(self.upsert_diagram(project_id, parsed))
-        return {
+        result = {
             "project_id": project_id,
             "folder": str(root),
             "imported": len(imported),
             "skipped": skipped,
             "diagrams": [{"diagram_id": item["diagram_id"], "title": item["title"]} for item in imported],
         }
+        from architectural_knowledge_db.services.import_export import ImportExportService
+
+        return ImportExportService(self.conn)._with_auto_export(project_id, result)
 
     def export_diagrams(self, project_id: str, folder: str | Path) -> dict[str, Any]:
         self.projects.require_project(project_id)
@@ -81,9 +84,9 @@ class UMLService:
         exported = []
         for diagram in self.list_diagrams(project_id, limit=5000):
             filename = diagram.get("model", {}).get("source_key") or f"{safe_filename(diagram['diagram_id'])}.puml"
-            path = root / filename
+            path = _target_for_source_key(root, filename, f"{safe_filename(diagram['diagram_id'])}.puml")
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(self.render_diagram(project_id, diagram["diagram_id"]), encoding="utf-8", newline="\n")
+            _write_text_exact(path, self.render_diagram(project_id, diagram["diagram_id"]))
             exported.append(str(path))
         return {"project_id": project_id, "folder": str(root), "exported": len(exported), "files": exported}
 
@@ -397,7 +400,7 @@ class UMLService:
         root = Path(folder)
         checked = []
         for path in sorted(root.rglob("*.puml")):
-            text = path.read_text(encoding="utf-8")
+            text = _read_text_exact(path)
             parsed = parse_plantuml(text, source_uri=str(path), source_key=str(path.relative_to(root)))
             rendered = render_parsed_passthrough(parsed)
             reparsed = parse_plantuml(rendered, source_uri=str(path), source_key=str(path.relative_to(root)))
@@ -767,6 +770,24 @@ def _line(value: str) -> str:
 def is_template_or_include_path(source_key: str) -> bool:
     parts = {part.lower() for part in Path(source_key).parts}
     return "_includes" in parts or "_templates" in parts or "_template" in parts
+
+
+def _read_text_exact(path: Path) -> str:
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        return handle.read()
+
+
+def _write_text_exact(path: Path, text: str) -> None:
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        handle.write(text)
+
+
+def _target_for_source_key(root: Path, source_key: str, fallback: str) -> Path:
+    normalized = source_key.replace("\\", "/").strip()
+    candidate = PurePosixPath(normalized) if normalized else PurePosixPath(fallback)
+    if candidate.is_absolute() or not candidate.parts or any(part in {"", ".", ".."} or ":" in part for part in candidate.parts):
+        candidate = PurePosixPath(fallback)
+    return root / Path(*candidate.parts)
 
 
 def repo_relative_key(path: Path) -> str:

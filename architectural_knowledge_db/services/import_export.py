@@ -4,11 +4,13 @@ import csv
 import json
 import posixpath
 import re
+import shutil
 import sqlite3
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import unquote
 
+from architectural_knowledge_db.config import auto_export_root_for_database
 from architectural_knowledge_db.models import AdrInput, DefinitionInput, KnowledgeLinkInput, RuleInput, SourceAreaInput
 from architectural_knowledge_db.services.knowledge import KnowledgeService
 
@@ -30,6 +32,7 @@ SAD_DECISION_RE = re.compile(
 )
 DEFAULT_DOCUMENT_PATTERNS = ["*.md", "*.markdown", "*.yml", "*.yaml", "*.json", "*.csv"]
 TEMPLATE_PARTS = {"_template", "_templates"}
+MANAGED_EXPORT_ENTRIES = ("adr", "documents", "items", "uml", "links", "roadmap", "topics", "specs")
 
 
 class ImportExportService:
@@ -45,7 +48,7 @@ class ImportExportService:
         skipped = []
         for path in sorted(root.rglob("*.md")):
             source_key = path.relative_to(root).as_posix()
-            text = path.read_text(encoding="utf-8")
+            text = _read_text_exact(path)
             if is_template_or_readme_adr(path, source_key, text):
                 skipped.append(source_key)
                 continue
@@ -70,7 +73,7 @@ class ImportExportService:
                 evidence=f"ADR import {source_key}",
             )
             imported.append(item)
-        return {
+        return self._with_auto_export(project_id, {
             "project_id": project_id,
             "folder": str(root),
             "imported": len(imported),
@@ -79,7 +82,7 @@ class ImportExportService:
                 {"adr_id": adr["adr_id"], "title": adr["title"], "source_uri": adr.get("source_uri")}
                 for adr in imported
             ],
-        }
+        })
 
     def export_adrs(self, project_id: str, folder: str | Path) -> dict[str, Any]:
         root = Path(folder)
@@ -87,9 +90,12 @@ class ImportExportService:
         adrs = self.knowledge.list_adrs(project_id, limit=1000)
         exported = []
         for adr in adrs:
-            filename = adr_filename(adr["adr_id"], adr["title"] or adr["adr_id"])
-            path = root / filename
-            path.write_text(render_adr_markdown(adr), encoding="utf-8", newline="\n")
+            metadata = adr.get("metadata") or {}
+            fallback = adr_filename(adr["adr_id"], adr["title"] or adr["adr_id"])
+            path = _target_for_source_key(root, metadata.get("source_key"), fallback)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            text = adr.get("raw_source") or render_adr_markdown(adr)
+            _write_text_exact(path, text)
             exported.append(str(path))
         return {"project_id": project_id, "folder": str(root), "exported": len(exported), "files": exported}
 
@@ -113,7 +119,7 @@ class ImportExportService:
             source_key = path.relative_to(root).as_posix()
             if not _matches_any(source_key, include_patterns) or _matches_any(source_key, exclude_patterns):
                 continue
-            text = path.read_text(encoding="utf-8")
+            text = _read_text_exact(path)
             document = parse_document_file(path, text, source_uri=str(path), source_key=source_key)
             classification = classify_document(source_key, path, document)
             metadata = {
@@ -142,7 +148,7 @@ class ImportExportService:
             self._link_document(item, path, root, text, document)
             imported.append(item)
             derived.extend(self._import_derived_architecture_records(project_id, item, path, root, text, document))
-        return {
+        return self._with_auto_export(project_id, {
             "project_id": project_id,
             "folder": str(root),
             "include": include_patterns,
@@ -168,28 +174,34 @@ class ImportExportService:
                 }
                 for item in derived
             ],
-        }
+        })
 
     def import_rules(self, project_id: str, path: str | Path) -> dict[str, Any]:
         records = _records_from_file(path)
         rules = []
         for record in records:
             rules.append(self.knowledge.upsert_rule(project_id, RuleInput(**record)))
-        return {"project_id": project_id, "imported": len(rules), "rules": rules}
+        return self._with_auto_export(project_id, {"project_id": project_id, "imported": len(rules), "rules": rules})
 
     def import_definitions(self, project_id: str, path: str | Path) -> dict[str, Any]:
         records = _records_from_file(path)
         definitions = []
         for record in records:
             definitions.append(self.knowledge.upsert_definition(project_id, DefinitionInput(**record)))
-        return {"project_id": project_id, "imported": len(definitions), "definitions": definitions}
+        return self._with_auto_export(
+            project_id,
+            {"project_id": project_id, "imported": len(definitions), "definitions": definitions},
+        )
 
     def import_source_areas(self, project_id: str, path: str | Path) -> dict[str, Any]:
         records = _records_from_file(path)
         source_areas = []
         for record in records:
             source_areas.append(self.knowledge.upsert_source_area(project_id, SourceAreaInput(**record)))
-        return {"project_id": project_id, "imported": len(source_areas), "source_areas": source_areas}
+        return self._with_auto_export(
+            project_id,
+            {"project_id": project_id, "imported": len(source_areas), "source_areas": source_areas},
+        )
 
     def export_items(self, project_id: str, path: str | Path, item_type: str | None = None) -> dict[str, Any]:
         include_types = [item_type] if item_type else None
@@ -216,10 +228,11 @@ class ImportExportService:
             body_text = metadata.get("body_text")
             if not source_key or body_text is None:
                 continue
-            target = root / source_key
+            fallback = f"{item['local_id']}.md"
+            target = _target_for_source_key(root, source_key, fallback)
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(body_text, encoding="utf-8", newline="\n")
-            exported.append(source_key)
+            _write_text_exact(target, body_text)
+            exported.append(target.relative_to(root).as_posix())
         return {"project_id": project_id, "folder": str(root), "exported": len(exported), "files": exported}
 
     def export_links(self, project_id: str, folder: str | Path) -> dict[str, Any]:
@@ -348,11 +361,13 @@ class ImportExportService:
             exported.append(str(spec_dir / "file-map.puml"))
         return {"project_id": project_id, "exported": len(rows), "files": exported}
 
-    def export_corpus(self, project_id: str, folder: str | Path) -> dict[str, Any]:
+    def export_corpus(self, project_id: str, folder: str | Path, clean: bool = True) -> dict[str, Any]:
         from architectural_knowledge_db.services.uml import UMLService
 
         root = Path(folder)
         root.mkdir(parents=True, exist_ok=True)
+        if clean:
+            _clean_export_root(root)
         adr = self.export_adrs(project_id, root / "adr")
         documents = self.export_documents(project_id, root / "documents")
         items = self.export_items(project_id, root / "items" / "items.json")
@@ -388,18 +403,40 @@ class ImportExportService:
                 for p in fresh_root.rglob("*")
                 if p.is_file()
             }
+            expected_files = {
+                p.relative_to(expected_root).as_posix(): p
+                for p in expected_root.rglob("*")
+                if p.is_file()
+            }
             for rel, fresh_path in sorted(fresh_files.items()):
                 expected_path = expected_root / rel
                 if expected_path.is_file() and expected_path.read_bytes() == fresh_path.read_bytes():
                     matched += 1
                 else:
                     mismatched.append(rel)
+            extra = sorted(set(expected_files) - set(fresh_files))
         return {
             "project_id": project_id,
             "folder": str(expected_root),
             "checked": matched + len(mismatched),
             "matched": matched,
             "mismatched": mismatched,
+            "extra": extra,
+        }
+
+    def _with_auto_export(self, project_id: str, result: dict[str, Any]) -> dict[str, Any]:
+        export_root = _auto_export_root_for_connection(self.conn)
+        if export_root is None:
+            return result
+        export = self.export_corpus(project_id, export_root, clean=True)
+        verification = self.verify_corpus(project_id, export_root)
+        return {
+            **result,
+            "auto_export": {
+                "folder": str(export_root),
+                "export": export,
+                "verification": verification,
+            },
         }
 
     def _link_document(
@@ -992,7 +1029,7 @@ def _section_body_for_render(adr: dict[str, Any], role: str, fallback: str) -> s
 
 def _records_from_file(path: str | Path) -> list[dict[str, Any]]:
     source = Path(path)
-    text = source.read_text(encoding="utf-8")
+    text = _read_text_exact(source)
     if source.suffix.lower() in {".yaml", ".yml"}:
         import yaml
 
@@ -1017,3 +1054,45 @@ def _matches_any(path: str, patterns: list[str]) -> bool:
 
 def _puml_alias(target: str) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "_", target).strip("_") or "node"
+
+
+def _read_text_exact(path: Path) -> str:
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        return handle.read()
+
+
+def _write_text_exact(path: Path, text: str) -> None:
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        handle.write(text)
+
+
+def _target_for_source_key(root: Path, source_key: Any, fallback: str) -> Path:
+    rel = _safe_relative_export_path(str(source_key or ""), fallback)
+    return root / Path(*rel.parts)
+
+
+def _safe_relative_export_path(source_key: str, fallback: str) -> PurePosixPath:
+    normalized = source_key.replace("\\", "/").strip()
+    candidate = PurePosixPath(normalized) if normalized else PurePosixPath(fallback)
+    if candidate.is_absolute() or not candidate.parts or any(part in {"", ".", ".."} or ":" in part for part in candidate.parts):
+        candidate = PurePosixPath(fallback)
+    return candidate
+
+
+def _clean_export_root(root: Path) -> None:
+    for name in MANAGED_EXPORT_ENTRIES:
+        target = root / name
+        if target.is_dir():
+            shutil.rmtree(target)
+        elif target.exists():
+            target.unlink()
+
+
+def _auto_export_root_for_connection(conn: sqlite3.Connection) -> Path | None:
+    row = conn.execute("PRAGMA database_list").fetchone()
+    if row is None:
+        return None
+    database_file = row["file"] if isinstance(row, sqlite3.Row) else row[2]
+    if not database_file:
+        return None
+    return auto_export_root_for_database(database_file)

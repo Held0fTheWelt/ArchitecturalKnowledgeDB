@@ -38,6 +38,55 @@ def test_export_documents_reproduces_source(tmp_path):
     assert (out / "sub" / "b.md").read_text(encoding="utf-8") == (src / "sub" / "b.md").read_text(encoding="utf-8")
 
 
+def test_import_documents_auto_exports_configured_mirror(tmp_path, monkeypatch):
+    conn = _project(tmp_path)
+    mirror = tmp_path / "mirror"
+    monkeypatch.setenv("AKDB_AUTO_EXPORT_ROOT", str(mirror))
+    src = tmp_path / "docs"
+    _make_docs(src)
+
+    result = ImportExportService(conn).import_documents("p", src)
+
+    assert result["auto_export"]["folder"] == str(mirror.resolve())
+    assert result["auto_export"]["verification"]["mismatched"] == []
+    assert result["auto_export"]["verification"]["extra"] == []
+    assert (mirror / "documents" / "a.md").read_text(encoding="utf-8") == (src / "a.md").read_text(encoding="utf-8")
+    assert (mirror / "items" / "items.json").exists()
+
+
+def test_export_corpus_removes_stale_managed_files(tmp_path):
+    conn = _project(tmp_path)
+    src = tmp_path / "docs"
+    _make_docs(src)
+    ImportExportService(conn).import_documents("p", src)
+    out = tmp_path / "corpus"
+    stale = out / "documents" / "stale.md"
+    stale.parent.mkdir(parents=True)
+    stale.write_text("old\n", encoding="utf-8")
+
+    ImportExportService(conn).export_corpus("p", out)
+
+    assert not stale.exists()
+    assert (out / "documents" / "a.md").exists()
+
+
+def test_export_adrs_preserves_import_source_path_and_raw_text(tmp_path):
+    conn = _project(tmp_path)
+    src = tmp_path / "adrs"
+    nested = src / "nested"
+    nested.mkdir(parents=True)
+    source_file = nested / "kept-name.md"
+    source_file.write_bytes(
+        b"# ADR-0007: Keep Path\r\n\r\n## Status\r\n\r\naccepted\r\n\r\n## Decision\r\n\r\nPreserve raw file bytes.\r\n"
+    )
+    ImportExportService(conn).import_adrs("p", src)
+
+    out = tmp_path / "out"
+    ImportExportService(conn).export_adrs("p", out)
+
+    assert (out / "nested" / "kept-name.md").read_bytes() == source_file.read_bytes()
+
+
 def test_export_corpus_populates_layout(tmp_path):
     conn = _project(tmp_path)
     src = tmp_path / "docs"

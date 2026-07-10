@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import sqlite3
 from pathlib import Path
 
 from architectural_knowledge_db.db.connection import initialize_database
@@ -67,6 +68,34 @@ def test_default_project_is_injected(tmp_path):
                           "params": {"name": "architectural_knowledge_db_search",
                                      "arguments": {"query": "SQLite"}}})  # no project_id supplied
     assert "isError" not in resp["result"]
+
+
+def test_tool_call_commits_successful_mutation(tmp_path):
+    db_path = tmp_path / "mcp.sqlite"
+    conn = initialize_database(db_path)
+    ProjectService(conn).upsert_project(ProjectUpsert(project_id="p", display_name="P"))
+    conn.commit()
+    server = StdioServer(conn)
+
+    resp = server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "tools/call",
+            "params": {
+                "name": "akdb_propose_adr",
+                "arguments": {"project_id": "p", "adr_id": "ADR-0099", "title": "Committed"},
+            },
+        }
+    )
+
+    assert "isError" not in resp["result"]
+    probe = sqlite3.connect(db_path)
+    try:
+        count = probe.execute("SELECT COUNT(*) FROM adrs WHERE adr_id = 'ADR-0099'").fetchone()[0]
+    finally:
+        probe.close()
+    assert count == 1
 
 
 def test_serve_loop_emits_one_line_per_request(tmp_path):

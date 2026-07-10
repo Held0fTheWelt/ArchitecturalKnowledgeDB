@@ -56,7 +56,9 @@ class StdioServer:
                 arguments["project_id"] = self.default_project
             try:
                 result = self.dispatcher.dispatch(name, arguments)
+                self.conn.commit()
             except Exception as exc:  # tool-level error: MCP result with isError, not a protocol error
+                self.conn.rollback()
                 return self._ok(msg_id, {"content": [{"type": "text", "text": str(exc)}], "isError": True})
             text = json.dumps(result, ensure_ascii=False, default=str)
             return self._ok(msg_id, {"content": [{"type": "text", "text": text}]})

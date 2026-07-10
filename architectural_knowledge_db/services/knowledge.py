@@ -84,7 +84,7 @@ class KnowledgeService:
         rows = self.conn.execute(
             f"""
             SELECT ki.*, a.adr_id, a.context_md, a.decision_md, a.consequences_md,
-                   a.supersedes_json, a.superseded_by_json
+                   a.supersedes_json, a.superseded_by_json, a.raw_source, a.sections_json
             FROM knowledge_items ki
             JOIN adrs a ON a.item_uid = ki.item_uid
             WHERE ki.project_id = ? {status_clause}

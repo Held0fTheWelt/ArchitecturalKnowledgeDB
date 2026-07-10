@@ -17,6 +17,7 @@ class Settings:
     port: int = DEFAULT_PORT
     store_author_email_hash: bool = False
     include_commit_body: bool = False
+    auto_export_root: Path | None = None
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -33,11 +34,50 @@ class Settings:
             port=port,
             store_author_email_hash=_truthy(os.getenv("AKDB_STORE_AUTHOR_EMAIL_HASH")),
             include_commit_body=_truthy(os.getenv("AKDB_INCLUDE_COMMIT_BODY")),
+            auto_export_root=_auto_export_root(data_root, database_path),
         )
 
 
 def _truthy(value: str | None) -> bool:
     return value is not None and value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _falsy(value: str | None) -> bool:
+    return value is not None and value.strip().lower() in {"0", "false", "no", "off"}
+
+
+def _auto_export_root(data_root: Path, database_path: Path) -> Path | None:
+    if _falsy(os.getenv("AKDB_AUTO_EXPORT")):
+        return None
+    explicit = os.getenv("AKDB_AUTO_EXPORT_ROOT") or os.getenv("AKDB_EXPORT_ROOT")
+    if explicit and explicit.strip():
+        return Path(explicit).expanduser().resolve()
+    if _truthy(os.getenv("AKDB_AUTO_EXPORT")):
+        return (data_root / "exports").resolve()
+    return _workspace_auto_export_root(data_root, database_path)
+
+
+def auto_export_root_for_database(database_path: Path | str) -> Path | None:
+    database = Path(database_path).expanduser().resolve()
+    data_root = Path(os.getenv("AKDB_DATA_ROOT", str(database.parent))).expanduser().resolve()
+    return _auto_export_root(data_root, database)
+
+
+def _workspace_auto_export_root(data_root: Path, database_path: Path) -> Path | None:
+    try:
+        data = data_root.resolve()
+        database = database_path.resolve()
+    except OSError:
+        return None
+    if data.name.lower() != ".akdb" or database.parent != data:
+        return None
+    repo = data.parent
+    if repo.name != "ArchitecturalKnowledgeDB" or repo.parent.name != "Tools":
+        return None
+    workspace = repo.parent.parent
+    if workspace.name != "TinyToolDevelopment":
+        return None
+    return workspace / "AKDB" / "export"
 
 
 def load_project_registry(path: Path) -> dict[str, Any]:

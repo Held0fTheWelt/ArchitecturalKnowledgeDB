@@ -26,6 +26,9 @@ akdb serve --host 127.0.0.1 --port 8787
 | `AKDB_PORT` | `8787` | Default service port for environment-based settings. |
 | `AKDB_SOURCE_ROOT` | unset | Resolves portable `/sources/...` registry paths. |
 | `AKDB_DEFAULT_PROJECT` | unset | MCP default project when a tool call omits `project_id`. |
+| `AKDB_AUTO_EXPORT` | workspace default | Set to `0`, `false`, `no`, or `off` to disable automatic corpus export after imports. Set to truthy without a root to use `<AKDB_DATA_ROOT>\exports`. |
+| `AKDB_AUTO_EXPORT_ROOT` | Tiny Tool live DB: `D:\TinyToolDevelopment\AKDB\export` | Export folder for the automatic full corpus mirror after imports. |
+| `AKDB_EXPORT_ROOT` | unset | Backward-compatible alias for `AKDB_AUTO_EXPORT_ROOT`. |
 | `AKDB_STORE_AUTHOR_EMAIL_HASH` | false | Enables storage of hashed author email metadata during Git provenance scans. |
 | `AKDB_INCLUDE_COMMIT_BODY` | false | Includes commit body text in stored Git provenance metadata. |
 | `AKDB_RECALL_BACKEND` | unset | Optional semantic recall backend mode. FTS remains available when unset. |

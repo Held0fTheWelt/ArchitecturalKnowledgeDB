@@ -25,7 +25,7 @@ note right of KS
 end note
 @enduml
 """
-    (uml_dir / "knowledge-store.puml").write_text(source, encoding="utf-8")
+    (uml_dir / "knowledge-store.puml").write_text(source, encoding="utf-8", newline="\n")
 
     result = UMLService(conn).import_diagrams("akdb", uml_dir)
     diagram = UMLService(conn).get_diagram("akdb", "knowledge-store")
@@ -39,6 +39,25 @@ end note
     pack = ContextPackBuilder(conn).build("akdb", ContextPackRequest(task="Change KnowledgeService"))
     assert pack["uml_diagrams"][0]["local_id"] == "knowledge-store"
     assert any(item["details"]["name"] == "KnowledgeService" for item in pack["uml_elements"])
+
+
+def test_uml_import_auto_exports_original_path_and_raw_text(conn, tmp_path: Path, monkeypatch) -> None:
+    add_project(conn, "akdb")
+    mirror = tmp_path / "mirror"
+    monkeypatch.setenv("AKDB_AUTO_EXPORT_ROOT", str(mirror))
+    uml_dir = tmp_path / "uml"
+    nested = uml_dir / "Project" / "Demo"
+    nested.mkdir(parents=True)
+    source_file = nested / "model.puml"
+    source_file.write_bytes(
+        b"@startuml\r\ntitle Demo\r\ncomponent A\r\ncomponent B\r\nA --> B : calls\r\n@enduml\r\n"
+    )
+
+    result = UMLService(conn).import_diagrams("akdb", uml_dir)
+
+    assert result["auto_export"]["verification"]["mismatched"] == []
+    assert result["auto_export"]["verification"]["extra"] == []
+    assert (mirror / "uml" / "Project" / "Demo" / "model.puml").read_bytes() == source_file.read_bytes()
 
 
 def test_uml_db_edit_marks_dirty_and_exports_structured_model(conn, tmp_path: Path) -> None:
