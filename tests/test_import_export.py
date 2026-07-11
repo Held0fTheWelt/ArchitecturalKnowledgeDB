@@ -119,3 +119,21 @@ detail: Demo detail.
     assert any(row["link_type"] == "references_adr" and row["target_ref"] == "ADR-PROD-0003" for row in links)
     assert any(row["link_type"] == "references_product_facts" for row in links)
     assert any(row["target_ref"] == "UML/Plugins/Demo/components/c4-context.md" for row in links)
+
+
+def test_document_import_preserves_multi_document_yaml(conn, tmp_path: Path) -> None:
+    add_project(conn, "akdb")
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "governance.yaml").write_text(
+        "schema: governance\nrules:\n  - id: R1\n---\nschema: gates\ngates:\n  - id: G1\n",
+        encoding="utf-8",
+    )
+
+    result = ImportExportService(conn).import_documents("akdb", docs)
+    items = KnowledgeService(conn).list_items("akdb", include_types=["document"])
+
+    assert result["imported"] == 1
+    data = items[0]["details"]["data"]
+    assert data["document_count"] == 2
+    assert [document["schema"] for document in data["documents"]] == ["governance", "gates"]

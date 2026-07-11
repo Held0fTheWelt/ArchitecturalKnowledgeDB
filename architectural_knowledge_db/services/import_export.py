@@ -768,9 +768,7 @@ def parse_document_file(path: Path, text: str, source_uri: str | None = None, so
         document["metadata"] = {"body_md": text, "headings": document["headings"]}
         return document
     if suffix in {".yml", ".yaml"}:
-        import yaml
-
-        data = yaml.safe_load(text) or {}
+        data = load_yaml_documents(text)
         return parse_structured_document(path, text, data, "yaml", source_uri, source_key)
     if suffix == ".json":
         data = json.loads(text)
@@ -779,6 +777,17 @@ def parse_document_file(path: Path, text: str, source_uri: str | None = None, so
         rows = list(csv.DictReader(text.splitlines()))
         return parse_structured_document(path, text, {"rows": rows, "row_count": len(rows)}, "csv", source_uri, source_key)
     return parse_structured_document(path, text, {}, "text", source_uri, source_key)
+
+
+def load_yaml_documents(text: str) -> Any:
+    import yaml
+
+    documents = [document for document in yaml.safe_load_all(text) if document is not None]
+    if not documents:
+        return {}
+    if len(documents) == 1:
+        return documents[0]
+    return {"document_count": len(documents), "documents": documents}
 
 
 def parse_structured_document(
