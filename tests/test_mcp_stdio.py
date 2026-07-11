@@ -9,7 +9,7 @@ from architectural_knowledge_db.db.connection import initialize_database
 from architectural_knowledge_db.models import AdrInput, ProjectUpsert
 from architectural_knowledge_db.services.knowledge import KnowledgeService
 from architectural_knowledge_db.services.projects import ProjectService
-from architectural_knowledge_db.mcp_stdio import StdioServer, serve
+from architectural_knowledge_db.mcp_stdio import StdioServer, configure_stdio_utf8, serve
 
 
 def _seed(tmp_path: Path):
@@ -112,3 +112,13 @@ def test_serve_loop_emits_one_line_per_request(tmp_path):
     assert json.loads(lines[0])["result"]["serverInfo"]["name"] == "akdb"
     assert any(t["name"] == "architectural_knowledge_db_search"
                for t in json.loads(lines[1])["result"]["tools"])
+
+
+def test_stdio_transport_is_reconfigured_to_utf8():
+    buffer = io.BytesIO()
+    stream = io.TextIOWrapper(buffer, encoding="cp1252")
+    configure_stdio_utf8(stream)
+    assert stream.encoding.lower().replace("-", "") == "utf8"
+    stream.write(json.dumps({"description": "source -> target"}, ensure_ascii=False).replace("->", "→"))
+    stream.flush()
+    assert "→".encode("utf-8") in buffer.getvalue()

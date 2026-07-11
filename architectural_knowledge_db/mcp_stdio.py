@@ -15,6 +15,14 @@ SERVER_VERSION = "0.1.0"
 DEFAULT_PROTOCOL_VERSION = "2025-06-18"
 
 
+def configure_stdio_utf8(*streams: TextIO) -> None:
+    """Make MCP JSON-RPC transport encoding deterministic on Windows consoles."""
+    for stream in streams:
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8", errors="strict")
+
+
 def _tools_list() -> list[dict[str, Any]]:
     return [
         {
@@ -93,6 +101,7 @@ def serve(stdin: TextIO, stdout: TextIO, conn: sqlite3.Connection,
 
 
 def main() -> None:
+    configure_stdio_utf8(sys.stdin, sys.stdout)
     settings = Settings.from_env()
     conn = initialize_database(settings.database_path)
     conn.execute("PRAGMA busy_timeout = 5000")

@@ -2,6 +2,10 @@
 
 The `akdb-mcp` console script is a spec-compliant stdio MCP server over the AKDB knowledge database. It works with any MCP client. Register it once per client. All configuration is via environment variables; nothing client-specific is hard-coded.
 
+The server explicitly configures stdin/stdout as UTF-8 before the JSON-RPC loop. This is required on
+Windows, where inherited console encodings such as `cp1252` cannot represent every Unicode character
+that may occur in tool descriptions or architecture content.
+
 ## Environment Variables
 
 | Variable | Purpose | Windows example | WSL example |
