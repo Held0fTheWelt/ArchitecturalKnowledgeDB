@@ -11,7 +11,7 @@ from architectural_knowledge_db.db.connection import initialize_database
 from architectural_knowledge_db.mcp import MCP_MANIFEST, McpDispatcher
 
 SERVER_NAME = "akdb"
-SERVER_VERSION = "0.1.0"
+SERVER_VERSION = "0.1.1"
 DEFAULT_PROTOCOL_VERSION = "2025-06-18"
 
 

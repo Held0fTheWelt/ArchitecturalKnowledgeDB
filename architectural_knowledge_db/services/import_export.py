@@ -30,6 +30,7 @@ SAD_DECISION_RE = re.compile(
     r"^###\s+(?P<decision_id>D\d+)\s*[:.-]\s*(?P<title>.+?)\s*$",
     re.IGNORECASE | re.MULTILINE,
 )
+SAD_MAIN_SECTION_RE = re.compile(r"^##(?!#)[ \t]+[^\r\n]+$", re.MULTILINE)
 DEFAULT_DOCUMENT_PATTERNS = ["*.md", "*.markdown", "*.yml", "*.yaml", "*.json", "*.csv"]
 TEMPLATE_PARTS = {"_template", "_templates"}
 MANAGED_EXPORT_ENTRIES = ("adr", "documents", "items", "uml", "links", "roadmap", "topics", "specs")
@@ -859,6 +860,9 @@ def parse_sad_decisions(text: str) -> list[dict[str, str]]:
     for index, match in enumerate(matches):
         start = match.end()
         end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        next_main_section = SAD_MAIN_SECTION_RE.search(text, start, end)
+        if next_main_section:
+            end = next_main_section.start()
         body = text[start:end].strip()
         status_match = re.search(r"\*\*Status:\*\*\s*([A-Za-z_ -]+)", body)
         decisions.append(

@@ -44,7 +44,7 @@ from architectural_knowledge_db.services.uml import UMLService
 def create_app() -> FastAPI:
     app = FastAPI(
         title="ArchitecturalKnowledgeDB Knowledge DB API",
-        version="0.1.0",
+        version="0.1.1",
         description="Multi-project DB-first architecture knowledge service with linked Git provenance.",
     )
 

@@ -88,7 +88,7 @@ def _strip_heavy(value: Any) -> Any:
 
 MCP_MANIFEST: dict[str, Any] = {
     "name": "architectural_knowledge_db",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "Multi-project architecture knowledge service with ADR, UML, rules, definitions, source areas, and linked Git provenance.",
     "tools": [
         {

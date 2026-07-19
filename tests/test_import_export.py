@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from architectural_knowledge_db.services.import_export import ImportExportService
+from architectural_knowledge_db.services.import_export import ImportExportService, parse_sad_decisions
 from architectural_knowledge_db.services.knowledge import KnowledgeService
 from architectural_knowledge_db.services.search import SearchService
 from tests.conftest import add_project
@@ -119,6 +119,48 @@ detail: Demo detail.
     assert any(row["link_type"] == "references_adr" and row["target_ref"] == "ADR-PROD-0003" for row in links)
     assert any(row["link_type"] == "references_product_facts" for row in links)
     assert any(row["target_ref"] == "UML/Plugins/Demo/components/c4-context.md" for row in links)
+
+
+def test_parse_sad_decisions_stops_before_following_main_sections() -> None:
+    decisions = parse_sad_decisions(
+        """# Demo - Software Architecture
+
+## 9. Architecture Decisions
+
+### D1: Keep The Boundary
+
+**Status:** Accepted
+**Decision.** The demo keeps its boundary explicit.
+
+### D2: Preserve Evidence
+
+**Status:** Accepted
+**Decision.** The demo preserves evidence links.
+
+## 10. Quality Requirements
+
+The quality requirements must not become part of D2.
+
+## 11. Risks and Technical Debt
+
+The risks must not become part of D2.
+
+## 12. Glossary
+
+The glossary must not become part of D2.
+"""
+    )
+
+    assert [decision["decision_id"] for decision in decisions] == ["D1", "D2"]
+    assert decisions[0]["body_md"] == (
+        "**Status:** Accepted\n**Decision.** The demo keeps its boundary explicit."
+    )
+    assert decisions[1]["body_md"] == (
+        "**Status:** Accepted\n**Decision.** The demo preserves evidence links."
+    )
+    assert all("## 10." not in decision["body_md"] for decision in decisions)
+    assert all("## 11." not in decision["body_md"] for decision in decisions)
+    assert all("## 12." not in decision["body_md"] for decision in decisions)
 
 
 def test_document_import_preserves_multi_document_yaml(conn, tmp_path: Path) -> None:
