@@ -44,3 +44,27 @@ def test_database_execute_no_params():
     db = _sqlite_db()
     assert db.execute("SELECT 1 AS ok").fetchone()["ok"] == 1
     db.close()
+
+
+def test_settings_reads_database_url(monkeypatch):
+    from architectural_knowledge_db.config import Settings
+    monkeypatch.setenv("AKDB_DB_URL", "postgresql://u:p@localhost/akdb")
+    assert Settings.from_env().database_url == "postgresql://u:p@localhost/akdb"
+
+
+def test_settings_database_url_defaults_none(monkeypatch):
+    from architectural_knowledge_db.config import Settings
+    monkeypatch.delenv("AKDB_DB_URL", raising=False)
+    assert Settings.from_env().database_url is None
+
+
+def test_connect_returns_database_for_sqlite(tmp_path):
+    from architectural_knowledge_db.db.connection import connect
+    from architectural_knowledge_db.db.database import Database
+    db = connect(tmp_path / "x.sqlite")
+    try:
+        assert isinstance(db, Database)
+        assert db.is_postgres is False
+        assert db.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
+    finally:
+        db.close()

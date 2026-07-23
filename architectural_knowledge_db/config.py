@@ -18,6 +18,7 @@ class Settings:
     store_author_email_hash: bool = False
     include_commit_body: bool = False
     auto_export_root: Path | None = None
+    database_url: str | None = None
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -27,6 +28,7 @@ class Settings:
         ).expanduser().resolve()
         host = os.getenv("AKDB_HOST", "127.0.0.1")
         port = int(os.getenv("AKDB_PORT", str(DEFAULT_PORT)))
+        database_url = os.getenv("AKDB_DB_URL") or None
         return cls(
             data_root=data_root,
             database_path=database_path,
@@ -35,6 +37,7 @@ class Settings:
             store_author_email_hash=_truthy(os.getenv("AKDB_STORE_AUTHOR_EMAIL_HASH")),
             include_commit_body=_truthy(os.getenv("AKDB_INCLUDE_COMMIT_BODY")),
             auto_export_root=_auto_export_root(data_root, database_path),
+            database_url=database_url,
         )
 
 
