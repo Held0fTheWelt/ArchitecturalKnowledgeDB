@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import sqlite3
 from typing import Any
 
 from architectural_knowledge_db.services.knowledge import KnowledgeService
@@ -9,7 +8,7 @@ from architectural_knowledge_db.services.projects import ProjectService
 
 
 class SearchService:
-    def __init__(self, conn: sqlite3.Connection):
+    def __init__(self, conn: Any):
         self.conn = conn
         self.projects = ProjectService(conn)
         self.knowledge = KnowledgeService(conn)
@@ -29,28 +28,18 @@ class SearchService:
         if not terms:
             return self._like_search(project_id, query, include_types, include_shared, limit)
 
-        type_clause = ""
-        params: list[Any] = [_fts_match(terms), *spaces]
-        if include_types:
-            type_clause = f"AND ki.item_type IN ({','.join('?' for _ in include_types)})"
-            params.extend(include_types)
-        params.append(limit)
-        sql = f"""
-            SELECT f.item_uid, f.item_type, f.title,
-                   snippet(fts_knowledge, 4, '[', ']', '...', 16) AS snippet,
-                   bm25(fts_knowledge) AS score,
-                   ki.project_id, ki.space_id, ki.local_id, ki.authority_level, ki.status, ki.summary
-            FROM fts_knowledge f
-            JOIN knowledge_items ki ON ki.item_uid = f.item_uid
-            WHERE fts_knowledge MATCH ?
-              AND ki.space_id IN ({','.join('?' for _ in spaces)})
-              {type_clause}
-            ORDER BY score
-            LIMIT ?
-        """
+        if self.conn.is_postgres:
+            sql, params = self._pg_fts_sql(query, spaces, include_types, limit)
+        else:
+            sql, params = self._sqlite_fts_sql(terms, spaces, include_types, limit)
+
         try:
             rows = self.conn.execute(sql, params).fetchall()
-        except sqlite3.OperationalError:
+        except Exception:
+            # FTS query failed (e.g. malformed match): degrade to LIKE. On PostgreSQL
+            # the failed statement aborts the transaction, so roll back first.
+            if self.conn.is_postgres:
+                self.conn.rollback()
             return self._like_search(project_id, query, include_types, include_shared, limit)
 
         results = []
@@ -74,6 +63,52 @@ class SearchService:
             )
         return results
 
+    def _sqlite_fts_sql(self, terms, spaces, include_types, limit):
+        type_clause = ""
+        params = [_fts_match(terms), *spaces]
+        if include_types:
+            type_clause = f"AND ki.item_type IN ({','.join('?' for _ in include_types)})"
+            params.extend(include_types)
+        params.append(limit)
+        sql = f"""
+            SELECT f.item_uid, f.item_type, f.title,
+                   snippet(fts_knowledge, 4, '[', ']', '...', 16) AS snippet,
+                   bm25(fts_knowledge) AS score,
+                   ki.project_id, ki.space_id, ki.local_id, ki.authority_level, ki.status, ki.summary
+            FROM fts_knowledge f
+            JOIN knowledge_items ki ON ki.item_uid = f.item_uid
+            WHERE fts_knowledge MATCH ?
+              AND ki.space_id IN ({','.join('?' for _ in spaces)})
+              {type_clause}
+            ORDER BY score
+            LIMIT ?
+        """
+        return sql, params
+
+    def _pg_fts_sql(self, query, spaces, include_types, limit):
+        type_clause = ""
+        # query bound three times, left-to-right: ts_headline, ts_rank, WHERE
+        params = [query, query, query, *spaces]
+        if include_types:
+            type_clause = f"AND ki.item_type IN ({','.join('?' for _ in include_types)})"
+            params.extend(include_types)
+        params.append(limit)
+        sql = f"""
+            SELECT f.item_uid, f.item_type, f.title,
+                   ts_headline('english', f.body, websearch_to_tsquery('english', ?),
+                               'StartSel=[, StopSel=], MaxWords=16, MinWords=1') AS snippet,
+                   ts_rank(f.tsv, websearch_to_tsquery('english', ?)) AS score,
+                   ki.project_id, ki.space_id, ki.local_id, ki.authority_level, ki.status, ki.summary
+            FROM fts_knowledge f
+            JOIN knowledge_items ki ON ki.item_uid = f.item_uid
+            WHERE f.tsv @@ websearch_to_tsquery('english', ?)
+              AND ki.space_id IN ({','.join('?' for _ in spaces)})
+              {type_clause}
+            ORDER BY score DESC
+            LIMIT ?
+        """
+        return sql, params
+
     def _like_search(
         self,
         project_id: str,
@@ -90,13 +125,14 @@ class SearchService:
             type_clause = f"AND ki.item_type IN ({','.join('?' for _ in include_types)})"
             params.extend(include_types)
         params.append(limit)
+        like = "ILIKE" if self.conn.is_postgres else "LIKE"
         rows = self.conn.execute(
             f"""
             SELECT ki.*, f.body
             FROM knowledge_items ki
             JOIN fts_knowledge f ON f.item_uid = ki.item_uid
             WHERE ki.space_id IN ({','.join('?' for _ in spaces)})
-              AND (ki.title LIKE ? OR f.body LIKE ?)
+              AND (ki.title {like} ? OR f.body {like} ?)
               {type_clause}
             ORDER BY ki.updated_at DESC
             LIMIT ?
