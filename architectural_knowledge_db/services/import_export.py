@@ -309,6 +309,25 @@ class ImportExportService:
         text = "\n".join(lines).rstrip("\n") + "\n"
         target.write_text(text, encoding="utf-8", newline="\n")
 
+    def _seen_local_ids_for_project(self, project_id: str) -> dict[tuple[str, str], str]:
+        """Seed the collision tracker from items already in the DB.
+
+        Lets import_documents() detect a document_id collision against an
+        EARLIER, separate call (e.g. docs/architecture then UML) rather than
+        only within the current call's loop.
+        """
+        seen: dict[tuple[str, str], str] = {}
+        rows = self.conn.execute(
+            "SELECT item_type, local_id, metadata_json FROM knowledge_items WHERE project_id = ?",
+            (project_id,),
+        ).fetchall()
+        for row in rows:
+            metadata = json.loads(row["metadata_json"] or "{}")
+            repo_key = metadata.get("repo_source_key")
+            if repo_key:
+                seen[(row["item_type"], row["local_id"])] = repo_key
+        return seen
+
     def import_documents(
         self,
         project_id: str,
@@ -323,14 +342,22 @@ class ImportExportService:
         exclude_patterns = exclude or []
         imported = []
         derived = []
-        # Disambiguate document_id collisions within this import run — e.g. a UML
-        # `.puml` + `.md` companion pair sharing the same basename (spec class B)
-        # would otherwise upsert into the SAME item, silently discarding one file's
+        # Disambiguate document_id collisions -- e.g. a UML `.puml` + `.md`
+        # companion pair sharing the same basename (spec class B) would
+        # otherwise upsert into the SAME item, silently discarding one file's
         # body_text. document_id_for() intentionally ignores suffix (so unrelated
         # single-file documents like "README.md" keep their stable short id); this
-        # tracks (item_type, local_id) -> source_key and only appends the suffix
-        # when a real same-run collision is detected.
-        seen_local_ids: dict[tuple[str, str], str] = {}
+        # tracks (item_type, local_id) -> repo_source_key and only disambiguates
+        # when a real collision (a DIFFERENT file) is detected. Keyed by
+        # repo_source_key (not the import-root-relative source_key) so it also
+        # catches CROSS-CALL collisions: docs/architecture/** and UML/** mirror
+        # the same plugin folder names, so e.g. both trees' "Demo/README.md"
+        # produce the identical document_id_for() result relative to their own
+        # call's root -- a real Phase 4 gap (2026-07-23) where the second
+        # import_documents() call (UML) silently overwrote the first's (docs)
+        # body_text. _seen_local_ids_for_project() seeds this from the live DB
+        # so it also catches collisions against an EARLIER, separate call.
+        seen_local_ids = self._seen_local_ids_for_project(project_id)
         for path in sorted(root.rglob("*")):
             if not path.is_file():
                 continue
@@ -351,17 +378,26 @@ class ImportExportService:
             document = parse_document_file(path, text, source_uri=str(path), source_key=source_key)
             classification = classify_document(source_key, path, document)
             local_id = document["document_id"]
+            repo_key = repo_relative_key(path)
             collision_key = (classification["item_type"], local_id)
-            previous_source_key = seen_local_ids.get(collision_key)
-            if previous_source_key is not None and previous_source_key != source_key:
+            previous_repo_key = seen_local_ids.get(collision_key)
+            if previous_repo_key is not None and previous_repo_key != repo_key:
                 suffix = path.suffix.lstrip(".").lower() or "file"
                 local_id = f"{local_id}--{suffix}"
                 collision_key = (classification["item_type"], local_id)
-            seen_local_ids[collision_key] = source_key
+                previous_repo_key = seen_local_ids.get(collision_key)
+                if previous_repo_key is not None and previous_repo_key != repo_key:
+                    # Same-suffix collision (e.g. two different trees' README.md):
+                    # the suffix alone can't disambiguate -- fall back to the
+                    # top-level repo tree segment (e.g. "docs" vs "uml").
+                    tree_segment = repo_key.split("/", 1)[0].lower() or "root"
+                    local_id = f"{local_id}--{tree_segment}"
+                    collision_key = (classification["item_type"], local_id)
+            seen_local_ids[collision_key] = repo_key
             metadata = {
                 **document.get("metadata", {}),
                 "source_key": document["source_key"],
-                "repo_source_key": repo_relative_key(path),
+                "repo_source_key": repo_key,
                 "format": document["format"],
                 "doc_kind": classification["doc_kind"],
                 "body_text": text,

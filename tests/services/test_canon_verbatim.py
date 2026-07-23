@@ -19,6 +19,17 @@ CANON_FIXTURES = {
     "UML/Plugins/Demo/components/c4-context.md": "```plantuml\n@startuml\n@enduml\n```\n",
     "operations/notes.log": "2026-01-01 boot ok\n",
     "plugins/Demo/Demo.uplugin": '{ "FriendlyName": "Demo" }\n',
+    # Real gap found in Phase 4 (2026-07-23): docs/architecture/** and UML/**
+    # mirror the same plugin folder names, so a README.md at parallel paths in
+    # both trees produces the SAME document_id_for() result (it's derived
+    # relative to each import_documents() call's own root, not the full
+    # repo-relative path). Because import_documents() is called once per tree,
+    # the in-run collision tracker (seen_local_ids) can't see across calls,
+    # and the second call's upsert silently overwrote the first call's
+    # body_text. Same suffix on both sides, so the suffix-based disambiguator
+    # for companion-file collisions doesn't help here either.
+    "plugins/Demo/README.md": "# Demo SAD tree readme\n",
+    "UML/Plugins/Demo/README.md": "# Demo UML tree readme\n",
 }
 
 
