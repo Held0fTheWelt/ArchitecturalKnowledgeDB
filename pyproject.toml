@@ -34,6 +34,7 @@ include = ["architectural_knowledge_db*"]
 [tool.setuptools.package-data]
 architectural_knowledge_db = [
   "db/schema/*.sql",
+  "db/schema/pg/*.sql",
   "templates/starter/*.md",
   "templates/starter/adr/*.md",
   "templates/starter/specs/*.md",
