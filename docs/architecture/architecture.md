@@ -264,6 +264,18 @@ sqlite3.Connection surface; backend divergence is confined to five files (databa
 migrations + schema/pg, search, import_export). Timestamps stay TEXT on PostgreSQL v1; pgvector
 and connection pooling are deferred.
 
+### D-SOR: AKDB is the system of record for its own architecture
+
+**Status:** Accepted
+
+AKDB's architecture is authored and maintained in the AKDB database, not in hand-written
+markdown. The docs/architecture folder is a deterministic arc42 export (export_sad) of the
+database and is never hand-edited. Two usage contexts each have their own knowledge base and
+export target: AKDB documents itself into ArchitecturalKnowledgeDB/docs, while the Tiny Tool
+Development platform exports to D:\TinyToolDevelopment\AKDB\export. Hand-authored architecture
+folders are retired only after their content is captured in the database and the export
+reproduces the equivalent.
+
 ### D1: Active Outer Tool Classification
 
 **Status:** Accepted
