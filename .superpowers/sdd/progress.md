@@ -78,4 +78,16 @@ repo root; `akdb export --help` now lists `target-add`/`target-list`/`flush`/`sy
 `target-verify` on PATH, which Plan B's freshness gate needs (it shells out to `akdb`, never
 imports AKDB internals).
 
+## Real bug found+fixed during Plan B (post-merge, direct `main` commit `80475d6`)
+
+Registering `ttd-canon` via `akdb export target-add --dest docs/architecture/_generated`
+from Windows stored `dest_root` as `docs\architecture\_generated` (typer's `Path` renders
+with the OS separator). Plan B Task 7.3's CI job runs on `ubuntu-latest`, where `Path(...)`
+does NOT treat `\` as a separator -- `_mirror_path`/`export_incremental`/`verify_export`
+would have silently treated the whole string as one path segment there, breaking the
+freshness gate in CI while working fine locally. Fixed with a TDD regression test:
+`ExportTargetsService.register_target` now normalizes `dest_root` to POSIX (`/`) on write
+(`_normalize_dest_root`), so DB rows are portable regardless of which OS registered them.
+Full suite re-verified green (203 passed, 147 skipped) before committing.
+
 Next: hand off to Plan B on the TTD side (`chore/auto-export-mirror` off `5.4`).
