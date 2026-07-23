@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from tests.conftest import add_project
+from tests.conftest import add_project, catalog_table_names
 
 
 def test_item_memory_table_exists(conn):
-    names = {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    assert "item_memory" in names
+    assert "item_memory" in catalog_table_names(conn)
 
 
 def test_use_pin_decay(conn):

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from tests.conftest import add_project
+from tests.conftest import add_project, catalog_table_names
 
 
 class _StubEmbed:
@@ -10,8 +10,7 @@ class _StubEmbed:
 
 
 def test_item_embeddings_table_exists(conn):
-    names = {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    assert "item_embeddings" in names
+    assert "item_embeddings" in catalog_table_names(conn)
 
 
 def test_fts_backend_resolves(conn):

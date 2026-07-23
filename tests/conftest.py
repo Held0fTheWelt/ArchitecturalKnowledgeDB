@@ -46,3 +46,25 @@ def conn(request, tmp_path: Path):
 def add_project(conn, project_id: str) -> None:
     ProjectService(conn).upsert_project(ProjectUpsert(project_id=project_id, display_name=project_id))
     conn.commit()
+
+
+def catalog_table_names(conn) -> set[str]:
+    """Backend-portable table name set (sqlite_master | pg_tables)."""
+    if getattr(conn, "is_postgres", False):
+        rows = conn.execute(
+            "SELECT tablename AS name FROM pg_catalog.pg_tables WHERE schemaname = 'public'"
+        ).fetchall()
+    else:
+        rows = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    return {r["name"] for r in rows}
+
+
+def catalog_index_names(conn) -> set[str]:
+    """Backend-portable index name set (sqlite_master | pg_indexes)."""
+    if getattr(conn, "is_postgres", False):
+        rows = conn.execute(
+            "SELECT indexname AS name FROM pg_catalog.pg_indexes WHERE schemaname = 'public'"
+        ).fetchall()
+    else:
+        rows = conn.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()
+    return {r["name"] for r in rows}

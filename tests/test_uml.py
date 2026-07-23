@@ -118,7 +118,11 @@ def test_uml_reimport_removes_old_element_links_before_replacing_items(conn, tmp
 
     assert result["imported"] == 1
     assert {element["name"] for element in diagram["elements"]} == {"B"}
-    assert conn.execute("SELECT COUNT(*) FROM knowledge_links WHERE source_item_uid = ?", (element_uid,)).fetchone()[0] == 0
+    link_count = conn.execute(
+        "SELECT COUNT(*) AS n FROM knowledge_links WHERE source_item_uid = ?",
+        (element_uid,),
+    ).fetchone()["n"]
+    assert link_count == 0
 
 
 def test_mermaid_import_indexes_flowchart(conn, tmp_path: Path) -> None:

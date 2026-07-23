@@ -29,7 +29,7 @@ class SearchService:
             return self._like_search(project_id, query, include_types, include_shared, limit)
 
         if self.conn.is_postgres:
-            sql, params = self._pg_fts_sql(query, spaces, include_types, limit)
+            sql, params = self._pg_fts_sql(terms, spaces, include_types, limit)
         else:
             sql, params = self._sqlite_fts_sql(terms, spaces, include_types, limit)
 
@@ -85,10 +85,13 @@ class SearchService:
         """
         return sql, params
 
-    def _pg_fts_sql(self, query, spaces, include_types, limit):
+    def _pg_fts_sql(self, terms, spaces, include_types, limit):
         type_clause = ""
-        # query bound three times, left-to-right: ts_headline, ts_rank, WHERE
-        params = [query, query, query, *spaces]
+        # OR terms to mirror SQLite fts5 `"t1" OR "t2"` semantics; raw websearch
+        # treats spaces as AND and drops hits that only share a subset of terms.
+        match = " OR ".join(terms)
+        # match bound three times, left-to-right: ts_headline, ts_rank, WHERE
+        params = [match, match, match, *spaces]
         if include_types:
             type_clause = f"AND ki.item_type IN ({','.join('?' for _ in include_types)})"
             params.extend(include_types)

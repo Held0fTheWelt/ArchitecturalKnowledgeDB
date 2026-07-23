@@ -21,9 +21,9 @@ class MemoryService:
                 INSERT INTO item_memory(item_uid, use_count, last_used_at, pinned, salience)
                 VALUES (?, 1, ?, 0, ?)
                 ON CONFLICT(item_uid) DO UPDATE SET
-                  use_count = use_count + 1,
+                  use_count = item_memory.use_count + 1,
                   last_used_at = excluded.last_used_at,
-                  salience = salience + excluded.salience
+                  salience = item_memory.salience + excluded.salience
                 """,
                 (item_uid, now, boost),
             )

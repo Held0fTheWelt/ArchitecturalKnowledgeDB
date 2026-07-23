@@ -17,10 +17,12 @@ def test_sqlite_fts_sql_uses_fts5_functions():
     assert params[-1] == 10
 
 
-def test_pg_fts_sql_uses_tsquery_and_binds_query():
-    sql, params = _svc(True)._pg_fts_sql("alpha beta", ["s1"], ["adr"], 5)
+def test_pg_fts_sql_uses_tsquery_and_binds_or_terms():
+    sql, params = _svc(True)._pg_fts_sql(["alpha", "beta"], ["s1"], ["adr"], 5)
     assert "websearch_to_tsquery('english', ?)" in sql
     assert "f.tsv @@ websearch_to_tsquery" in sql
     assert "ts_rank(f.tsv" in sql
-    assert params[0] == "alpha beta"  # query bound for ts_headline/ts_rank/where
+    # OR terms mirror SQLite fts5 semantics (spaces in raw query are AND in websearch).
+    assert params[0] == "alpha OR beta"
+    assert params[0] == params[1] == params[2]
     assert params[-1] == 5

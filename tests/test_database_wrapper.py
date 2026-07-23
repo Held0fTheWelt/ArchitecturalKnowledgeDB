@@ -1,6 +1,10 @@
 import sqlite3
 
-from architectural_knowledge_db.db.database import Database, to_pyformat
+from architectural_knowledge_db.db.database import (
+    Database,
+    rewrite_sqlite_json_extract_for_pg,
+    to_pyformat,
+)
 
 
 def test_qmark_becomes_pyformat():
@@ -11,6 +15,13 @@ def test_qmark_becomes_pyformat():
 def test_literal_percent_is_escaped_before_placeholders():
     assert to_pyformat("SELECT '100%' AS p WHERE a = ?") \
         == "SELECT '100%%' AS p WHERE a = %s"
+
+
+def test_json_extract_rewrites_for_postgres():
+    sql = "SELECT * FROM t WHERE json_extract(r.metadata_json, '$.diagram_id') = ?"
+    assert rewrite_sqlite_json_extract_for_pg(sql) == (
+        "SELECT * FROM t WHERE (r.metadata_json::json->>'diagram_id') = ?"
+    )
 
 
 def _sqlite_db():

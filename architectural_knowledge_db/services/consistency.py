@@ -417,7 +417,7 @@ class ConsistencyService:
             SELECT item_uid
             FROM knowledge_items
             WHERE project_id = ?
-              AND (item_uid = ? OR local_id = ? OR printf('%s:%s:%s', project_id, item_type, local_id) = ?)
+              AND (item_uid = ? OR local_id = ? OR (project_id || ':' || item_type || ':' || local_id) = ?)
             LIMIT 1
             """,
             (project_id, source, source, source),

@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-from tests.conftest import add_project
+from tests.conftest import add_project, catalog_index_names, catalog_table_names
 
 EXPECTED = {"topics", "mvps", "specs", "questions"}
 
 
 def test_entity_tables_and_index_exist(conn):
-    names = {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    assert EXPECTED <= names
-    idx = {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")}
-    assert "idx_mvps_seq" in idx
+    assert EXPECTED <= catalog_table_names(conn)
+    assert "idx_mvps_seq" in catalog_index_names(conn)
 
 
 def test_upsert_and_hydrate_entities(conn):

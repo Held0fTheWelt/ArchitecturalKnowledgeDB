@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Sequence
+
+_JSON_EXTRACT_RE = re.compile(
+    r"json_extract\(([^,]+),\s*'\$\.([^']+)'\)",
+    re.IGNORECASE,
+)
 
 
 def to_pyformat(sql: str) -> str:
@@ -10,6 +16,11 @@ def to_pyformat(sql: str) -> str:
     '?' bind marker into '%s'. Safe because no SQL string literal in this codebase
     contains a '?' or '%' (asserted by the codebase-wide test below)."""
     return sql.replace("%", "%%").replace("?", "%s")
+
+
+def rewrite_sqlite_json_extract_for_pg(sql: str) -> str:
+    """Map SQLite json_extract(expr, '$.key') to PostgreSQL (expr::json->>'key')."""
+    return _JSON_EXTRACT_RE.sub(r"(\1::json->>'\2')", sql)
 
 
 def _split_statements(script: str) -> list[str]:
@@ -29,7 +40,8 @@ class Database:
     def execute(self, sql: str, params: Sequence[Any] = ()) -> Any:
         bind = tuple(params)
         if self.is_postgres:
-            cur = self._raw.execute(to_pyformat(sql), bind or None)
+            pg_sql = rewrite_sqlite_json_extract_for_pg(sql)
+            cur = self._raw.execute(to_pyformat(pg_sql), bind or None)
             rowcount = getattr(cur, "rowcount", -1)
             if rowcount and rowcount > 0:
                 self._pg_changes += rowcount

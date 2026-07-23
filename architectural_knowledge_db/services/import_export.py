@@ -1103,9 +1103,11 @@ def _clean_export_root(root: Path) -> None:
 
 def _auto_export_root_for_connection(conn: Any) -> Path | None:
     # Resolves the on-disk SQLite file for workspace auto-export layout.
-    # Not applicable on PostgreSQL (no local database file / PRAGMA).
+    # PostgreSQL has no local DB file / PRAGMA; still honor explicit env export roots.
     if getattr(conn, "is_postgres", False):
-        return None
+        from architectural_knowledge_db.config import Settings
+
+        return Settings.from_env().auto_export_root
     row = conn.execute("PRAGMA database_list").fetchone()
     if row is None:
         return None

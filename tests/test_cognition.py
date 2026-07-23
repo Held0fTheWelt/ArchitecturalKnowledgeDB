@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-from tests.conftest import add_project
+from tests.conftest import add_project, catalog_index_names
 
 
 def test_link_type_index_exists(conn):
-    row = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_links_project_linktype'"
-    ).fetchone()
-    assert row is not None
+    assert "idx_links_project_linktype" in catalog_index_names(conn)
 
 
 def test_alias_folds_into_fts(conn):
