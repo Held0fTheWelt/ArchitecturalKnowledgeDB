@@ -95,6 +95,7 @@ Start here:
 - [Troubleshooting](docs/user/TROUBLESHOOTING.md)
 - [FAQ](docs/user/FAQ.md)
 - [MCP Access](docs/operations/MCP.md)
+- [PostgreSQL (opt-in)](docs/operations/postgres.md)
 - [Internal docs relocation note](docs/INTERNAL_DOCS_RELOCATED.md)
 
 Public user documentation only. Architecture specs, ADRs, contracts, schema, planning, and the maintainer runbook were evacuated to the private Tiny Tool Development `Git` repository after a public leak remediation (see `INTERNAL_DOCS_RELOCATED.md`).

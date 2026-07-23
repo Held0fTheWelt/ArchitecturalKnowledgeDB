@@ -14,6 +14,7 @@ Internal AKDB architecture specs, ADRs, contracts, schema reference, planning, a
 | Configure database paths and runtime settings | [user/SETTINGS_REFERENCE.md](user/SETTINGS_REFERENCE.md) |
 | Fix a local run or MCP setup | [user/TROUBLESHOOTING.md](user/TROUBLESHOOTING.md) |
 | Connect an MCP client | [operations/MCP.md](operations/MCP.md) |
+| Use PostgreSQL (opt-in) | [operations/postgres.md](operations/postgres.md) |
 | Internal docs relocation | [INTERNAL_DOCS_RELOCATED.md](INTERNAL_DOCS_RELOCATED.md) |
 
 ## Folder Map
@@ -21,7 +22,7 @@ Internal AKDB architecture specs, ADRs, contracts, schema reference, planning, a
 | Folder | Contains |
 | --- | --- |
 | `user/` | Practical user documentation: quick start, manual, settings, troubleshooting, FAQ, third-party notes. |
-| `operations/` | MCP setup and public operations notes. |
+| `operations/` | MCP setup, PostgreSQL opt-in ops, and public operations notes. |
 | `examples/` | Registry, compose, and standalone sample inputs. |
 
 ## Documentation Boundary
