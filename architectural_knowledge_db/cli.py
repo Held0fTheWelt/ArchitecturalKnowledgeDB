@@ -1038,6 +1038,84 @@ def export_verify(
         _print(ImportExportService(conn).verify_corpus(project, folder))
 
 
+@export_app.command("target-add")
+def export_target_add(
+    project: str = typer.Argument(...),
+    target_id: str = typer.Argument(...),
+    repo: str = typer.Option(..., "--repo", help="repository_id owning dest_root."),
+    dest: Path = typer.Option(..., "--dest", help="Destination mirror root."),
+    layout: str = typer.Option(..., "--layout"),
+    kinds: str = typer.Option(..., "--kinds", help="Comma-separated content kinds, e.g. sad,uml,adr."),
+    no_auto: bool = typer.Option(False, "--no-auto", help="Disable auto-flush for this target."),
+    disabled: bool = typer.Option(False, "--disabled", help="Register the target as disabled."),
+) -> None:
+    from architectural_knowledge_db.services.export_targets import ExportTargetsService
+
+    content_kinds = [k.strip() for k in kinds.split(",") if k.strip()]
+    with _conn() as conn:
+        ExportTargetsService(conn).register_target(
+            project,
+            target_id,
+            repository_id=repo,
+            dest_root=str(dest),
+            layout=layout,
+            content_kinds=content_kinds,
+            auto_export=not no_auto,
+            enabled=not disabled,
+        )
+        _print(ExportTargetsService(conn).get_target(project, target_id))
+
+
+@export_app.command("target-list")
+def export_target_list(project: str = typer.Argument(...)) -> None:
+    from architectural_knowledge_db.services.export_targets import ExportTargetsService
+
+    with _conn() as conn:
+        _print(ExportTargetsService(conn).list_targets(project))
+
+
+def _resolve_targets(conn: Any, project: str, target: str | None) -> list[str]:
+    from architectural_knowledge_db.services.export_targets import ExportTargetsService
+
+    if target:
+        return [target]
+    return [t["target_id"] for t in ExportTargetsService(conn).list_targets(project, enabled_only=True)]
+
+
+@export_app.command("flush")
+def export_flush(
+    project: str = typer.Argument(...),
+    target: str | None = typer.Option(None, "--target"),
+) -> None:
+    with _conn() as conn:
+        results = {t: ImportExportService(conn).export_incremental(project, t) for t in _resolve_targets(conn, project, target)}
+    _print(results)
+
+
+@export_app.command("sync")
+def export_sync(
+    project: str = typer.Argument(...),
+    target: str | None = typer.Option(None, "--target"),
+) -> None:
+    with _conn() as conn:
+        results = {t: ImportExportService(conn).export_sync(project, t) for t in _resolve_targets(conn, project, target)}
+    _print(results)
+
+
+@export_app.command("target-verify")
+def export_target_verify(
+    project: str = typer.Argument(...),
+    target: str | None = typer.Option(None, "--target"),
+) -> None:
+    with _conn() as conn:
+        targets = _resolve_targets(conn, project, target)
+        results = {t: ImportExportService(conn).verify_export(project, t) for t in targets}
+    _print(results)
+    drifted = any(r["mismatched"] or r["missing"] or r["extra"] for r in results.values())
+    if drifted:
+        raise typer.Exit(code=1)
+
+
 def main() -> None:
     app()
 

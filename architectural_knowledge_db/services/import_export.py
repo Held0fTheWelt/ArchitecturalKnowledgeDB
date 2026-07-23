@@ -47,33 +47,45 @@ class ImportExportService:
             raise ValueError(f"ADR folder does not exist: {root}")
         imported = []
         skipped = []
-        for path in sorted(root.rglob("*.md")):
-            source_key = path.relative_to(root).as_posix()
-            text = _read_text_exact(path)
-            if is_template_or_readme_adr(path, source_key, text):
-                skipped.append(source_key)
-                continue
-            adr = parse_adr_markdown(
-                text,
-                source_uri=str(path),
-                source_key=source_key,
-            )
-            adr.metadata.update(
-                {
-                    "source_key": source_key,
-                    "repo_source_key": repo_relative_key(path),
-                }
-            )
-            item = self.knowledge.upsert_adr(project_id, adr)
-            self._link_targets(
-                project_id,
-                item["item_uid"],
-                [
-                    *_markdown_link_targets(text, path),
-                ],
-                evidence=f"ADR import {source_key}",
-            )
-            imported.append(item)
+        from architectural_knowledge_db.services.export_flush import deferred_export
+
+        with deferred_export(self.conn):
+            for path in sorted(root.rglob("*.md")):
+                source_key = path.relative_to(root).as_posix()
+                text = _read_text_exact(path)
+                if is_template_or_readme_adr(path, source_key, text):
+                    skipped.append(source_key)
+                    continue
+                adr = parse_adr_markdown(
+                    text,
+                    source_uri=str(path),
+                    source_key=source_key,
+                )
+                adr.metadata.update(
+                    {
+                        "source_key": source_key,
+                        "repo_source_key": repo_relative_key(path),
+                        # Verbatim bytes alongside the structured decomposition
+                        # (context_md/decision_md/...) so ADRs flow through the
+                        # SAME generic byte-exact export path as SAD/documents
+                        # (list_items()-based export_canon/_mirror_path never
+                        # join the `adrs.raw_source` column). Real gap found
+                        # 2026-07-24: without this, ADRs were silently invisible
+                        # to export_canon()/verify_canon() -- see progress.md.
+                        "body_text": text,
+                        "body_encoding": "utf-8",
+                    }
+                )
+                item = self.knowledge.upsert_adr(project_id, adr)
+                self._link_targets(
+                    project_id,
+                    item["item_uid"],
+                    [
+                        *_markdown_link_targets(text, path),
+                    ],
+                    evidence=f"ADR import {source_key}",
+                )
+                imported.append(item)
         return self._with_auto_export(project_id, {
             "project_id": project_id,
             "folder": str(root),
@@ -358,69 +370,72 @@ class ImportExportService:
         # body_text. _seen_local_ids_for_project() seeds this from the live DB
         # so it also catches collisions against an EARLIER, separate call.
         seen_local_ids = self._seen_local_ids_for_project(project_id)
-        for path in sorted(root.rglob("*")):
-            if not path.is_file():
-                continue
-            source_key = path.relative_to(root).as_posix()
-            if include_patterns == ["**/*"]:
-                # Explicit "every file" include: fnmatch's "**/*" requires a literal
-                # "/" (glob-style ** is not special to fnmatch), so top-level files
-                # like "START-HERE.md" would otherwise be silently skipped. An
-                # explicit "**/*" means "every file" — bypass the suffix allowlist
-                # entirely rather than trying to out-glob fnmatch. Default behavior
-                # (DEFAULT_DOCUMENT_PATTERNS) is unchanged.
-                matched = not _matches_any(source_key, exclude_patterns)
-            else:
-                matched = _matches_any(source_key, include_patterns) and not _matches_any(source_key, exclude_patterns)
-            if not matched:
-                continue
-            text, encoding = _read_text_exact_any_encoding(path)
-            document = parse_document_file(path, text, source_uri=str(path), source_key=source_key)
-            classification = classify_document(source_key, path, document)
-            local_id = document["document_id"]
-            repo_key = repo_relative_key(path)
-            collision_key = (classification["item_type"], local_id)
-            previous_repo_key = seen_local_ids.get(collision_key)
-            if previous_repo_key is not None and previous_repo_key != repo_key:
-                suffix = path.suffix.lstrip(".").lower() or "file"
-                local_id = f"{local_id}--{suffix}"
+        from architectural_knowledge_db.services.export_flush import deferred_export
+
+        with deferred_export(self.conn):
+            for path in sorted(root.rglob("*")):
+                if not path.is_file():
+                    continue
+                source_key = path.relative_to(root).as_posix()
+                if include_patterns == ["**/*"]:
+                    # Explicit "every file" include: fnmatch's "**/*" requires a literal
+                    # "/" (glob-style ** is not special to fnmatch), so top-level files
+                    # like "START-HERE.md" would otherwise be silently skipped. An
+                    # explicit "**/*" means "every file" — bypass the suffix allowlist
+                    # entirely rather than trying to out-glob fnmatch. Default behavior
+                    # (DEFAULT_DOCUMENT_PATTERNS) is unchanged.
+                    matched = not _matches_any(source_key, exclude_patterns)
+                else:
+                    matched = _matches_any(source_key, include_patterns) and not _matches_any(source_key, exclude_patterns)
+                if not matched:
+                    continue
+                text, encoding = _read_text_exact_any_encoding(path)
+                document = parse_document_file(path, text, source_uri=str(path), source_key=source_key)
+                classification = classify_document(source_key, path, document)
+                local_id = document["document_id"]
+                repo_key = repo_relative_key(path)
                 collision_key = (classification["item_type"], local_id)
                 previous_repo_key = seen_local_ids.get(collision_key)
                 if previous_repo_key is not None and previous_repo_key != repo_key:
-                    # Same-suffix collision (e.g. two different trees' README.md):
-                    # the suffix alone can't disambiguate -- fall back to the
-                    # top-level repo tree segment (e.g. "docs" vs "uml").
-                    tree_segment = repo_key.split("/", 1)[0].lower() or "root"
-                    local_id = f"{local_id}--{tree_segment}"
+                    suffix = path.suffix.lstrip(".").lower() or "file"
+                    local_id = f"{local_id}--{suffix}"
                     collision_key = (classification["item_type"], local_id)
-            seen_local_ids[collision_key] = repo_key
-            metadata = {
-                **document.get("metadata", {}),
-                "source_key": document["source_key"],
-                "repo_source_key": repo_key,
-                "format": document["format"],
-                "doc_kind": classification["doc_kind"],
-                "body_text": text,
-                "body_encoding": encoding,
-                "headings": document.get("headings", []),
-            }
-            item_uid = self.knowledge._upsert_item(
-                project_id=project_id,
-                space_id=None,
-                item_type=classification["item_type"],
-                local_id=local_id,
-                title=document["title"],
-                status=classification["status"],
-                authority_level=classification["authority_level"],
-                summary=document["summary"],
-                source_uri=document["source_uri"],
-                metadata=metadata,
-            )
-            self.knowledge._index_item(item_uid)
-            item = self.knowledge.get_item_by_uid(item_uid)
-            self._link_document(item, path, root, text, document)
-            imported.append(item)
-            derived.extend(self._import_derived_architecture_records(project_id, item, path, root, text, document))
+                    previous_repo_key = seen_local_ids.get(collision_key)
+                    if previous_repo_key is not None and previous_repo_key != repo_key:
+                        # Same-suffix collision (e.g. two different trees' README.md):
+                        # the suffix alone can't disambiguate -- fall back to the
+                        # top-level repo tree segment (e.g. "docs" vs "uml").
+                        tree_segment = repo_key.split("/", 1)[0].lower() or "root"
+                        local_id = f"{local_id}--{tree_segment}"
+                        collision_key = (classification["item_type"], local_id)
+                seen_local_ids[collision_key] = repo_key
+                metadata = {
+                    **document.get("metadata", {}),
+                    "source_key": document["source_key"],
+                    "repo_source_key": repo_key,
+                    "format": document["format"],
+                    "doc_kind": classification["doc_kind"],
+                    "body_text": text,
+                    "body_encoding": encoding,
+                    "headings": document.get("headings", []),
+                }
+                item_uid = self.knowledge._upsert_item(
+                    project_id=project_id,
+                    space_id=None,
+                    item_type=classification["item_type"],
+                    local_id=local_id,
+                    title=document["title"],
+                    status=classification["status"],
+                    authority_level=classification["authority_level"],
+                    summary=document["summary"],
+                    source_uri=document["source_uri"],
+                    metadata=metadata,
+                )
+                self.knowledge._index_item(item_uid)
+                item = self.knowledge.get_item_by_uid(item_uid)
+                self._link_document(item, path, root, text, document)
+                imported.append(item)
+                derived.extend(self._import_derived_architecture_records(project_id, item, path, root, text, document))
         return self._with_auto_export(project_id, {
             "project_id": project_id,
             "folder": str(root),
@@ -607,6 +622,170 @@ class ImportExportService:
             "missing": missing,
             "extra": extra,
         }
+
+    def export_incremental(self, project_id: str, target_id: str) -> dict[str, Any]:
+        """Drain the target's dirty queue, writing/deleting only the changed mirror files.
+
+        A speed optimization over export_sync: correctness never depends on
+        this queue (verify_export is the safety net; export_sync the repair).
+        """
+        from architectural_knowledge_db.services.export_targets import ExportTargetsService
+
+        targets = ExportTargetsService(self.conn)
+        target = targets.get_target(project_id, target_id)
+        if target is None:
+            raise ValueError(f"Unknown export target {target_id} in project {project_id}")
+        dest_root = Path(target["dest_root"])
+        rows = targets.drain_dirty(project_id, target_id)
+        written: list[str] = []
+        deleted: list[str] = []
+        skipped: list[str] = []
+        # Coalesce multiple dirty rows for the same item_ref to its LAST
+        # recorded op (rows are FIFO-ordered by id; a later dict insert wins).
+        latest_by_ref: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            latest_by_ref[row["item_ref"]] = row
+        for item_ref, row in latest_by_ref.items():
+            mirror_path = _mirror_path(dest_root, item_ref)
+            if mirror_path is None:
+                skipped.append(item_ref)
+                continue
+            if row["op"] == "delete":
+                if mirror_path.exists():
+                    mirror_path.unlink()
+                    _prune_empty_dirs(mirror_path.parent, dest_root)
+                deleted.append(str(mirror_path))
+                continue
+            record = self._find_by_repo_source_key(project_id, item_ref)
+            if record is None:
+                # The item no longer exists (e.g. upsert-then-delete raced the
+                # queue) -- treat as a delete so the mirror doesn't go stale.
+                if mirror_path.exists():
+                    mirror_path.unlink()
+                    _prune_empty_dirs(mirror_path.parent, dest_root)
+                deleted.append(str(mirror_path))
+                continue
+            body_text, encoding = record
+            mirror_path.parent.mkdir(parents=True, exist_ok=True)
+            _write_text_exact_with_encoding(mirror_path, body_text, encoding)
+            written.append(str(mirror_path))
+        return {"written": written, "deleted": deleted, "skipped": skipped}
+
+    def _expected_mirror_files(self, project_id: str, dest_root: Path) -> dict[str, tuple[str, str]]:
+        """{mirror-relative path: (body_text, body_encoding)} for every item mappable into dest_root.
+
+        Same source of truth as export_canon: every project item carrying
+        repo_source_key + body_text, routed through _mirror_path. This is the
+        full-rebuild set used by both verify_export (byte compare) and
+        export_sync (full write); export_incremental only ever writes a subset
+        of this same mapping, so all three are provably consistent.
+        """
+        items = self.knowledge.list_items(project_id, include_shared=False, limit=100000)
+        expected: dict[str, tuple[str, str]] = {}
+        for item in items:
+            metadata = item.get("metadata") or {}
+            repo_key = metadata.get("repo_source_key")
+            body_text = metadata.get("body_text")
+            if not repo_key or body_text is None:
+                continue
+            mirror_path = _mirror_path(dest_root, repo_key)
+            if mirror_path is None:
+                continue
+            rel = mirror_path.relative_to(dest_root).as_posix()
+            expected[rel] = (body_text, metadata.get("body_encoding", "utf-8"))
+        return expected
+
+    def verify_export(self, project_id: str, target_id: str) -> dict[str, Any]:
+        """Byte-compare a fresh regeneration against the committed target mirror.
+
+        The correctness engine behind the freshness gate: matched/mismatched/
+        missing/extra, independent of the (speed-only) dirty queue.
+        """
+        from architectural_knowledge_db.services.export_targets import ExportTargetsService
+
+        target = ExportTargetsService(self.conn).get_target(project_id, target_id)
+        if target is None:
+            raise ValueError(f"Unknown export target {target_id} in project {project_id}")
+        dest_root = Path(target["dest_root"])
+        expected = self._expected_mirror_files(project_id, dest_root)
+        actual = (
+            {
+                p.relative_to(dest_root).as_posix(): p
+                for p in dest_root.rglob("*")
+                if p.is_file()
+            }
+            if dest_root.is_dir()
+            else {}
+        )
+        matched = 0
+        mismatched: list[str] = []
+        for rel, (body_text, encoding) in sorted(expected.items()):
+            actual_path = actual.get(rel)
+            if actual_path is None:
+                continue
+            expected_bytes = _encode_text_exact(body_text, encoding)
+            if actual_path.read_bytes() == expected_bytes:
+                matched += 1
+            else:
+                mismatched.append(rel)
+        missing = sorted(set(expected) - set(actual))
+        extra = sorted(set(actual) - set(expected))
+        return {
+            "project_id": project_id,
+            "target_id": target_id,
+            "dest_root": str(dest_root),
+            "matched": matched,
+            "mismatched": mismatched,
+            "missing": missing,
+            "extra": extra,
+        }
+
+    def export_sync(self, project_id: str, target_id: str) -> dict[str, Any]:
+        """Full rebuild of a target's mirror: write everything expected, prune extras, clear its dirty queue."""
+        from architectural_knowledge_db.services.export_targets import ExportTargetsService
+
+        targets = ExportTargetsService(self.conn)
+        target = targets.get_target(project_id, target_id)
+        if target is None:
+            raise ValueError(f"Unknown export target {target_id} in project {project_id}")
+        dest_root = Path(target["dest_root"])
+        dest_root.mkdir(parents=True, exist_ok=True)
+        expected = self._expected_mirror_files(project_id, dest_root)
+        written: list[str] = []
+        for rel, (body_text, encoding) in expected.items():
+            target_path = dest_root / Path(*PurePosixPath(rel).parts)
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            _write_text_exact_with_encoding(target_path, body_text, encoding)
+            written.append(str(target_path))
+        pruned: list[str] = []
+        for existing in list(dest_root.rglob("*")):
+            if not existing.is_file():
+                continue
+            rel = existing.relative_to(dest_root).as_posix()
+            if rel not in expected:
+                existing.unlink()
+                pruned.append(str(existing))
+        for existing in sorted(dest_root.rglob("*"), reverse=True):
+            if existing.is_dir() and not any(existing.iterdir()):
+                existing.rmdir()
+        targets.drain_dirty(project_id, target_id)
+        return {"written": written, "pruned": pruned}
+
+    def _find_by_repo_source_key(self, project_id: str, repo_source_key: str) -> tuple[str, str] | None:
+        row = self.conn.execute(
+            """
+            SELECT metadata_json FROM knowledge_items
+            WHERE project_id = ? AND json_extract(metadata_json, '$.repo_source_key') = ?
+            """,
+            (project_id, repo_source_key),
+        ).fetchone()
+        if row is None:
+            return None
+        metadata = json.loads(row["metadata_json"] or "{}")
+        body_text = metadata.get("body_text")
+        if body_text is None:
+            return None
+        return body_text, metadata.get("body_encoding", "utf-8")
 
     def export_links(self, project_id: str, folder: str | Path) -> dict[str, Any]:
         root = Path(folder)
@@ -1626,17 +1805,65 @@ def _read_text_exact_any_encoding(path: Path) -> tuple[str, str]:
     return _decode_text_exact(path.read_bytes())
 
 
+def _encode_text_exact(text: str, encoding: str) -> bytes:
+    """Byte-encode text using the exact encoding+BOM it was ingested with."""
+    if encoding == "utf-16-le-bom":
+        return _UTF16_LE_BOM + text.encode("utf-16-le")
+    if encoding == "utf-16-be-bom":
+        return _UTF16_BE_BOM + text.encode("utf-16-be")
+    if encoding == "utf-8-sig":
+        return _UTF8_BOM + text.encode("utf-8")
+    return text.encode("utf-8")
+
+
 def _write_text_exact_with_encoding(path: Path, text: str, encoding: str) -> None:
     """Write text back using the exact encoding+BOM it was ingested with."""
-    if encoding == "utf-16-le-bom":
-        payload = _UTF16_LE_BOM + text.encode("utf-16-le")
-    elif encoding == "utf-16-be-bom":
-        payload = _UTF16_BE_BOM + text.encode("utf-16-be")
-    elif encoding == "utf-8-sig":
-        payload = _UTF8_BOM + text.encode("utf-8")
-    else:
-        payload = text.encode("utf-8")
-    path.write_bytes(payload)
+    path.write_bytes(_encode_text_exact(text, encoding))
+
+
+_MIRROR_ROOT_RULES: tuple[tuple[str, str], ...] = (
+    ("docs/architecture/", ""),
+    ("UML/", "UML/"),
+    ("docs/ADR/", "ADR/"),
+)
+_MIRROR_EXCLUDE: tuple[str, ...] = ("**/product-facts.yml", "**/product-facts.yaml")
+
+
+def _mirror_path(dest_root: str | Path, repo_source_key: str) -> Path | None:
+    """Map a repo-relative source key to its path under a target's mirror root.
+
+    docs/architecture/<rest> -> <dest_root>/<rest>
+    UML/<rest>               -> <dest_root>/UML/<rest>
+    docs/ADR/<rest>          -> <dest_root>/ADR/<rest>
+    class-H (product-facts.yml) and anything outside these three roots -> None (skip).
+    """
+    import fnmatch
+
+    normalized = repo_source_key.replace("\\", "/")
+    if any(fnmatch.fnmatch(normalized, pattern) for pattern in _MIRROR_EXCLUDE):
+        return None
+    for prefix, mirror_prefix in _MIRROR_ROOT_RULES:
+        if normalized.startswith(prefix):
+            rest = normalized[len(prefix):]
+            if not rest:
+                return None
+            rel = f"{mirror_prefix}{rest}"
+            candidate = PurePosixPath(rel)
+            if candidate.is_absolute() or any(part in {"", ".", ".."} for part in candidate.parts):
+                return None
+            return Path(dest_root) / Path(*candidate.parts)
+    return None
+
+
+def _prune_empty_dirs(start: Path, stop_at: Path) -> None:
+    stop = Path(stop_at)
+    current = start
+    while current != stop and current.is_dir() and not any(current.iterdir()):
+        parent = current.parent
+        current.rmdir()
+        if parent == current:
+            break
+        current = parent
 
 
 def _target_for_source_key(root: Path, source_key: Any, fallback: str) -> Path:

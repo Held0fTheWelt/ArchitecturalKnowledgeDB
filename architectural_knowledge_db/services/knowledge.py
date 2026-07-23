@@ -492,6 +492,9 @@ class KnowledgeService:
             """,
             (project_id, item_type, local_id),
         ).fetchone()
+        from architectural_knowledge_db.services.export_flush import notify_item_write
+
+        notify_item_write(self.conn, project_id, item_type, metadata, op="upsert")
         return row["item_uid"]
 
     def _aliases_for_item(self, item_uid: str) -> list[str]:
