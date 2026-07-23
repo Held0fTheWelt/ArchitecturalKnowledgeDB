@@ -323,6 +323,14 @@ class ImportExportService:
         exclude_patterns = exclude or []
         imported = []
         derived = []
+        # Disambiguate document_id collisions within this import run — e.g. a UML
+        # `.puml` + `.md` companion pair sharing the same basename (spec class B)
+        # would otherwise upsert into the SAME item, silently discarding one file's
+        # body_text. document_id_for() intentionally ignores suffix (so unrelated
+        # single-file documents like "README.md" keep their stable short id); this
+        # tracks (item_type, local_id) -> source_key and only appends the suffix
+        # when a real same-run collision is detected.
+        seen_local_ids: dict[tuple[str, str], str] = {}
         for path in sorted(root.rglob("*")):
             if not path.is_file():
                 continue
@@ -332,6 +340,14 @@ class ImportExportService:
             text = _read_text_exact(path)
             document = parse_document_file(path, text, source_uri=str(path), source_key=source_key)
             classification = classify_document(source_key, path, document)
+            local_id = document["document_id"]
+            collision_key = (classification["item_type"], local_id)
+            previous_source_key = seen_local_ids.get(collision_key)
+            if previous_source_key is not None and previous_source_key != source_key:
+                suffix = path.suffix.lstrip(".").lower() or "file"
+                local_id = f"{local_id}--{suffix}"
+                collision_key = (classification["item_type"], local_id)
+            seen_local_ids[collision_key] = source_key
             metadata = {
                 **document.get("metadata", {}),
                 "source_key": document["source_key"],
@@ -345,7 +361,7 @@ class ImportExportService:
                 project_id=project_id,
                 space_id=None,
                 item_type=classification["item_type"],
-                local_id=document["document_id"],
+                local_id=local_id,
                 title=document["title"],
                 status=classification["status"],
                 authority_level=classification["authority_level"],
