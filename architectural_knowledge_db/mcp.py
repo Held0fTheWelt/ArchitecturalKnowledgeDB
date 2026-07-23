@@ -1053,6 +1053,33 @@ MCP_MANIFEST: dict[str, Any] = {
             },
         },
         {
+            "name": "akdb_export_flush",
+            "description": "Drain a target's dirty queue, writing/deleting only changed mirror files (fast, incremental).",
+            "input_schema": {
+                "type": "object",
+                "required": ["project_id", "target_id"],
+                "properties": {"project_id": {"type": "string"}, "target_id": {"type": "string"}},
+            },
+        },
+        {
+            "name": "akdb_verify_export",
+            "description": "Byte-compare a target's committed mirror against the DB; returns matched/mismatched/missing/extra.",
+            "input_schema": {
+                "type": "object",
+                "required": ["project_id", "target_id"],
+                "properties": {"project_id": {"type": "string"}, "target_id": {"type": "string"}},
+            },
+        },
+        {
+            "name": "akdb_export_sync",
+            "description": "Full rebuild of a target's mirror: write everything expected, prune extras, clear its dirty queue.",
+            "input_schema": {
+                "type": "object",
+                "required": ["project_id", "target_id"],
+                "properties": {"project_id": {"type": "string"}, "target_id": {"type": "string"}},
+            },
+        },
+        {
             "name": "akdb_reingest_project",
             "description": "Rebuild a project's knowledge by re-importing ADRs, architecture documents, and UML from its source folders, then rescanning Git provenance. Use to refresh the DB state after sources change. Folders default to the standard repo layout under source_root (AKDB_SOURCE_ROOT); missing folders are skipped. Writes to the database (run against a DB the agent owns, or with the :8787 service stopped).",
             "input_schema": {
@@ -1234,6 +1261,12 @@ class McpDispatcher:
             return ImportExportService(self.conn).export_canon(arguments["project_id"], arguments["folder"])
         if tool_name == "akdb_verify_canon":
             return ImportExportService(self.conn).verify_canon(arguments["project_id"], arguments["folder"])
+        if tool_name == "akdb_export_flush":
+            return ImportExportService(self.conn).export_incremental(arguments["project_id"], arguments["target_id"])
+        if tool_name == "akdb_verify_export":
+            return ImportExportService(self.conn).verify_export(arguments["project_id"], arguments["target_id"])
+        if tool_name == "akdb_export_sync":
+            return ImportExportService(self.conn).export_sync(arguments["project_id"], arguments["target_id"])
         if tool_name == "akdb_list_sads":
             return SadService(self.conn).list_documents(arguments["project_id"])
         if tool_name == "akdb_get_sad":
