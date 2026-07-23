@@ -608,6 +608,70 @@ class ImportExportService:
             "extra": extra,
         }
 
+    def export_incremental(self, project_id: str, target_id: str) -> dict[str, Any]:
+        """Drain the target's dirty queue, writing/deleting only the changed mirror files.
+
+        A speed optimization over export_sync: correctness never depends on
+        this queue (verify_export is the safety net; export_sync the repair).
+        """
+        from architectural_knowledge_db.services.export_targets import ExportTargetsService
+
+        targets = ExportTargetsService(self.conn)
+        target = targets.get_target(project_id, target_id)
+        if target is None:
+            raise ValueError(f"Unknown export target {target_id} in project {project_id}")
+        dest_root = Path(target["dest_root"])
+        rows = targets.drain_dirty(project_id, target_id)
+        written: list[str] = []
+        deleted: list[str] = []
+        skipped: list[str] = []
+        # Coalesce multiple dirty rows for the same item_ref to its LAST
+        # recorded op (rows are FIFO-ordered by id; a later dict insert wins).
+        latest_by_ref: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            latest_by_ref[row["item_ref"]] = row
+        for item_ref, row in latest_by_ref.items():
+            mirror_path = _mirror_path(dest_root, item_ref)
+            if mirror_path is None:
+                skipped.append(item_ref)
+                continue
+            if row["op"] == "delete":
+                if mirror_path.exists():
+                    mirror_path.unlink()
+                    _prune_empty_dirs(mirror_path.parent, dest_root)
+                deleted.append(str(mirror_path))
+                continue
+            record = self._find_by_repo_source_key(project_id, item_ref)
+            if record is None:
+                # The item no longer exists (e.g. upsert-then-delete raced the
+                # queue) -- treat as a delete so the mirror doesn't go stale.
+                if mirror_path.exists():
+                    mirror_path.unlink()
+                    _prune_empty_dirs(mirror_path.parent, dest_root)
+                deleted.append(str(mirror_path))
+                continue
+            body_text, encoding = record
+            mirror_path.parent.mkdir(parents=True, exist_ok=True)
+            _write_text_exact_with_encoding(mirror_path, body_text, encoding)
+            written.append(str(mirror_path))
+        return {"written": written, "deleted": deleted, "skipped": skipped}
+
+    def _find_by_repo_source_key(self, project_id: str, repo_source_key: str) -> tuple[str, str] | None:
+        row = self.conn.execute(
+            """
+            SELECT metadata_json FROM knowledge_items
+            WHERE project_id = ? AND json_extract(metadata_json, '$.repo_source_key') = ?
+            """,
+            (project_id, repo_source_key),
+        ).fetchone()
+        if row is None:
+            return None
+        metadata = json.loads(row["metadata_json"] or "{}")
+        body_text = metadata.get("body_text")
+        if body_text is None:
+            return None
+        return body_text, metadata.get("body_encoding", "utf-8")
+
     def export_links(self, project_id: str, folder: str | Path) -> dict[str, Any]:
         root = Path(folder)
         root.mkdir(parents=True, exist_ok=True)
@@ -1637,6 +1701,51 @@ def _write_text_exact_with_encoding(path: Path, text: str, encoding: str) -> Non
     else:
         payload = text.encode("utf-8")
     path.write_bytes(payload)
+
+
+_MIRROR_ROOT_RULES: tuple[tuple[str, str], ...] = (
+    ("docs/architecture/", ""),
+    ("UML/", "UML/"),
+    ("docs/ADR/", "ADR/"),
+)
+_MIRROR_EXCLUDE: tuple[str, ...] = ("**/product-facts.yml", "**/product-facts.yaml")
+
+
+def _mirror_path(dest_root: str | Path, repo_source_key: str) -> Path | None:
+    """Map a repo-relative source key to its path under a target's mirror root.
+
+    docs/architecture/<rest> -> <dest_root>/<rest>
+    UML/<rest>               -> <dest_root>/UML/<rest>
+    docs/ADR/<rest>          -> <dest_root>/ADR/<rest>
+    class-H (product-facts.yml) and anything outside these three roots -> None (skip).
+    """
+    import fnmatch
+
+    normalized = repo_source_key.replace("\\", "/")
+    if any(fnmatch.fnmatch(normalized, pattern) for pattern in _MIRROR_EXCLUDE):
+        return None
+    for prefix, mirror_prefix in _MIRROR_ROOT_RULES:
+        if normalized.startswith(prefix):
+            rest = normalized[len(prefix):]
+            if not rest:
+                return None
+            rel = f"{mirror_prefix}{rest}"
+            candidate = PurePosixPath(rel)
+            if candidate.is_absolute() or any(part in {"", ".", ".."} for part in candidate.parts):
+                return None
+            return Path(dest_root) / Path(*candidate.parts)
+    return None
+
+
+def _prune_empty_dirs(start: Path, stop_at: Path) -> None:
+    stop = Path(stop_at)
+    current = start
+    while current != stop and current.is_dir() and not any(current.iterdir()):
+        parent = current.parent
+        current.rmdir()
+        if parent == current:
+            break
+        current = parent
 
 
 def _target_for_source_key(root: Path, source_key: Any, fallback: str) -> Path:
