@@ -310,6 +310,24 @@ MCP_MANIFEST: dict[str, Any] = {
             },
         },
         {
+            "name": "akdb_export_canon",
+            "description": "Export the whole-tree repo-native canon mirror (repo_source_key layout) to a folder.",
+            "input_schema": {
+                "type": "object",
+                "required": ["project_id", "folder"],
+                "properties": {"project_id": {"type": "string"}, "folder": {"type": "string"}},
+            },
+        },
+        {
+            "name": "akdb_verify_canon",
+            "description": "Byte-diff a fresh canon export against the live repo tree (class-H excluded).",
+            "input_schema": {
+                "type": "object",
+                "required": ["project_id", "folder"],
+                "properties": {"project_id": {"type": "string"}, "folder": {"type": "string"}},
+            },
+        },
+        {
             "name": "akdb_list_sads",
             "description": "List DB-native SAD documents for a project.",
             "input_schema": {
@@ -1177,6 +1195,10 @@ class McpDispatcher:
             return ImportExportService(self.conn).import_adrs(arguments["project_id"], arguments["folder"])
         if tool_name == "akdb_export_adrs":
             return ImportExportService(self.conn).export_adrs(arguments["project_id"], arguments["folder"])
+        if tool_name == "akdb_export_canon":
+            return ImportExportService(self.conn).export_canon(arguments["project_id"], arguments["folder"])
+        if tool_name == "akdb_verify_canon":
+            return ImportExportService(self.conn).verify_canon(arguments["project_id"], arguments["folder"])
         if tool_name == "akdb_list_sads":
             return SadService(self.conn).list_documents(arguments["project_id"])
         if tool_name == "akdb_get_sad":

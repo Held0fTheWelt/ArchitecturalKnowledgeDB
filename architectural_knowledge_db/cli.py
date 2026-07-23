@@ -963,6 +963,28 @@ def _print(payload: Any) -> None:
     sys.stdout.buffer.write(b"\n")
 
 
+canon_app = typer.Typer(help="Whole-tree repo-native canon mirror export + verification.")
+app.add_typer(canon_app, name="canon")
+
+
+@canon_app.command("export")
+def canon_export(
+    project: str = typer.Option(..., "--project"),
+    folder: Path = typer.Option(..., "--folder"),
+) -> None:
+    with _conn() as conn:
+        _print(ImportExportService(conn).export_canon(project, folder))
+
+
+@canon_app.command("verify")
+def canon_verify(
+    project: str = typer.Option(..., "--project"),
+    folder: Path = typer.Option(..., "--folder", help="Live repo tree root to verify against."),
+) -> None:
+    with _conn() as conn:
+        _print(ImportExportService(conn).verify_canon(project, folder))
+
+
 export_app = typer.Typer(help="Deterministic corpus export and round-trip verification.")
 app.add_typer(export_app, name="export")
 
