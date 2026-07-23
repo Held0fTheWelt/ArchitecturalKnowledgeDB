@@ -7,3 +7,5 @@ __pycache__/
 *.sqlite-shm
 *.sqlite-wal
 /docs/superpowers
+/architectural_knowledge_db.egg-info
+/build
