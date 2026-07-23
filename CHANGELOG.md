@@ -31,9 +31,10 @@ self-documents into `docs/architecture`. Builds on the 0.2.0 dual-backend releas
 
 ### Notes
 
-- Hand-authored SAD retirement in the private `Git` repo (Phase 4) remains blocked until
-  generated-vs-hand-authored equivalence passes; this release ships the export capability and
-  the committed self-mirror without deleting the residual hand-authored copy.
+- Phase 4 retired the hand-authored SAD under
+  `Git/docs/architecture/plugins/ArchitecturalKnowledgeDB/architecture.md` after a normalized
+  equivalence gate against this generated mirror. That Git folder keeps `product-facts.yml` and a
+  pointer README; UML remains under `Git/UML/Plugins/ArchitecturalKnowledgeDB/`.
 
 ## [0.2.0] - 2026-07-23
 

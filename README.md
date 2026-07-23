@@ -97,8 +97,9 @@ python -m architectural_knowledge_db.cli sad export --project architectural-know
 
 Supporting notes that are not part of that export (for example
 [docs/architecture/dual-backend.md](docs/architecture/dual-backend.md)) may still be maintained
-as ordinary docs. The hand-authored SAD under `Git/docs/architecture/plugins/ArchitecturalKnowledgeDB`
-is a Phase 4 residual until export equivalence is proven; see
+as ordinary docs. The former hand-authored SAD under
+`Git/docs/architecture/plugins/ArchitecturalKnowledgeDB` was retired in Phase 4 after equivalence
+verification; that folder now holds product facts + a pointer README. See
 [docs/INTERNAL_DOCS_RELOCATED.md](docs/INTERNAL_DOCS_RELOCATED.md).
 
 ## Documentation Map

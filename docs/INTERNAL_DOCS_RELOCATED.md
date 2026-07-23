@@ -16,17 +16,19 @@ the exported UML tree to change product architecture; change the database and re
 Public decisions that govern AKDB packaging and ops (for example dual-backend) also live under
 [docs/adr](adr/) and supporting notes such as [architecture/dual-backend.md](architecture/dual-backend.md).
 
-## Phase 4 residual (hand-authored SAD not retired)
+## Phase 4 complete (hand-authored SAD retired)
 
-Equivalence between the generated self-mirror and the hand-authored SAD in the private `Git`
-repository has **not** yet been proven, so the hand-authored folder was **not** deleted:
+The hand-authored SAD copy under
+`Git/docs/architecture/plugins/ArchitecturalKnowledgeDB/architecture.md` was retired after a
+normalized equivalence gate against this generated mirror (evidence:
+`docs/superpowers/evidence/2026-07-23-akdb-retire-verify.md`, gitignored).
 
-- `Git/docs/architecture/plugins/ArchitecturalKnowledgeDB/`
+That Git folder now keeps only:
 
-Until Phase 4 retirement completes, that hand-authored SAD remains a residual reference copy.
-Do not treat deletion of that folder as done. Prefer the database + exported mirror for
-ongoing self-documentation work; close the equivalence gap before retiring the hand-authored
-copy.
+- `product-facts.yml` (website / Atlas projection; `sad:` points at this repo's generated mirror)
+- `README.md` (relocation pointer)
+
+UML remains under `Git/UML/Plugins/ArchitecturalKnowledgeDB/`.
 
 ## Private planning and cross-project authority
 
