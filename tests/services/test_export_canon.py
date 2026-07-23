@@ -81,6 +81,42 @@ def test_export_canon_preserves_non_utf8_encodings_byte_exact(conn, tmp_path):
     assert exported.read_bytes() == original_bytes, "UTF-16 bytes drifted on export"
 
 
+def test_export_canon_removes_stale_files_from_a_prior_run(conn, tmp_path):
+    # Real gap found in Phase 4 (2026-07-23): _clean_export_root() only wipes
+    # MANAGED_EXPORT_ENTRIES ("adr", "documents", "items", "uml", ...) -- the
+    # OLDER, separate per-type export layout. export_canon()'s whole-tree
+    # mirror writes under "docs/" (never in that allowlist) and "UML/", so a
+    # file whose live source is later deleted/renamed (docs: TinyToolExecution
+    # dropped its architecture.md) stayed on disk in AKDB/export forever,
+    # silently breaking the byte-faithful mirror invariant even though
+    # verify_canon() (which exports into a fresh temp dir) never sees it.
+    src = tmp_path / "repo"
+    _seed(src)
+    ProjectService(conn).upsert_project(
+        ProjectUpsert(project_id="canon-stale", display_name="Canon Stale")
+    )
+    svc = ImportExportService(conn)
+    svc.import_documents("canon-stale", src / "docs" / "architecture", include=["**/*"])
+    svc.import_documents("canon-stale", src / "UML", include=["**/*"])
+
+    out = tmp_path / "export"
+    svc.export_canon("canon-stale", out)
+    assert (out / "docs" / "architecture" / "START-HERE.md").is_file()
+
+    # Simulate the source item being retired from the project (e.g. the live
+    # file was deleted/renamed and a Phase-4-style DB cleanup ran) -- the item
+    # no longer exists, but nothing has re-exported yet.
+    conn.execute(
+        "DELETE FROM knowledge_items WHERE project_id = 'canon-stale' "
+        "AND metadata_json LIKE '%START-HERE.md%'"
+    )
+    svc.export_canon("canon-stale", out)
+
+    assert not (out / "docs" / "architecture" / "START-HERE.md").exists(), (
+        "stale export file from a prior run survived export_canon(clean=True)"
+    )
+
+
 def test_export_canon_excludes_product_fact_sheet_items(conn, tmp_path):
     # Real gap found in Phase 4 (2026-07-23): the live tiny-tool-development
     # project already carries unrelated "product_fact_sheet" items (an older,

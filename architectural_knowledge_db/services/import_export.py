@@ -531,7 +531,7 @@ class ImportExportService:
         root = Path(folder)
         root.mkdir(parents=True, exist_ok=True)
         if clean:
-            _clean_export_root(root)
+            _clean_canon_export_root(root)
         items = self.knowledge.list_items(project_id, include_shared=False, limit=100000)
         exported: list[str] = []
         for item in sorted(items, key=lambda it: (it.get("metadata") or {}).get("repo_source_key") or ""):
@@ -1659,6 +1659,29 @@ def _clean_export_root(root: Path) -> None:
             shutil.rmtree(target)
         elif target.exists():
             target.unlink()
+
+
+def _clean_canon_export_root(root: Path) -> None:
+    """Full wipe for export_canon()'s whole-tree mirror.
+
+    Real gap found in Phase 4 (2026-07-23): _clean_export_root() only clears
+    MANAGED_EXPORT_ENTRIES ("adr", "documents", "uml", ...) -- the OLDER,
+    separate per-type export layout used by export_corpus(). export_canon()
+    instead reproduces the live repo's own top-level layout ("docs/", "UML/"),
+    which is never in that allowlist, so a file whose source item was later
+    removed from the project (deleted/renamed live, or cleaned up as a stale
+    DB orphan) stayed on disk forever -- a silent, permanent drift in the
+    byte-faithful mirror that verify_canon() never catches (it exports into
+    a fresh temp dir, not this persistent root). export_canon() owns its
+    entire root exclusively, so a full wipe is correct here.
+    """
+    if not root.is_dir():
+        return
+    for entry in root.iterdir():
+        if entry.is_dir():
+            shutil.rmtree(entry)
+        else:
+            entry.unlink()
 
 
 def _auto_export_root_for_connection(conn: Any) -> Path | None:
