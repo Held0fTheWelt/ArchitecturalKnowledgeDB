@@ -41,7 +41,7 @@ that may occur in tool descriptions or architecture content.
     "akdb": {
       "command": "akdb-mcp",
       "env": {
-        "AKDB_DATABASE_PATH": "D:\\TinyToolDevelopment\\Tools\\ArchitecturalKnowledgeDB\\.akdb\\architectural_knowledge_db.sqlite",
+        "AKDB_DATABASE_PATH": "D:\\TinyToolDevelopment\\ArchitecturalKnowledgeDB\\.akdb\\architectural_knowledge_db.sqlite",
         "AKDB_SOURCE_ROOT": "D:\\TinyToolDevelopment",
         "AKDB_DEFAULT_PROJECT": "tiny-tool-development"
       }
@@ -68,7 +68,7 @@ Set `PYTHONPATH` in `env` when the package is not installed in that interpreter.
 command = "akdb-mcp"
 
 [mcp_servers.akdb.env]
-AKDB_DATABASE_PATH = "D:\\TinyToolDevelopment\\Tools\\ArchitecturalKnowledgeDB\\.akdb\\architectural_knowledge_db.sqlite"
+AKDB_DATABASE_PATH = "D:\\TinyToolDevelopment\\ArchitecturalKnowledgeDB\\.akdb\\architectural_knowledge_db.sqlite"
 AKDB_SOURCE_ROOT = "D:\\TinyToolDevelopment"
 AKDB_DEFAULT_PROJECT = "tiny-tool-development"
 ```
