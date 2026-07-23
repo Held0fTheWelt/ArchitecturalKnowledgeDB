@@ -56,3 +56,28 @@ PARITY_SLUGS = {"getting-started", "api-reference", "api-reference-1"}
 def test_heading_slugs_match_shared_parity_fixture():
     from architectural_knowledge_db.services.markdown_anchors import heading_slugs
     assert heading_slugs(PARITY_MD) == PARITY_SLUGS
+
+
+def test_scan_inventory_falls_back_to_filesystem_walk_when_repo_has_no_git(conn, tmp_path):
+    """Some registered workspace repositories (e.g. "Build") are plain content folders
+    with no `.git` directory in this environment. `git ls-files` would raise; scanning
+    must still succeed via an ordinary recursive filesystem walk so their real, on-disk
+    files are inventoried and resolvable through the manifest instead of silently
+    producing an empty/crashing scan."""
+    repo = tmp_path / "Build"
+    repo.mkdir()
+    (repo / "render.py").write_text("print(1)\n")
+    (repo / "sub").mkdir()
+    (repo / "sub" / "notes.md").write_text("# Notes\n")
+    ProjectService(conn).upsert_project(ProjectUpsert(project_id="ws", display_name="WS"))
+    RepositoryService(conn).register_repository(
+        "ws", RepositoryRegistration(repository_id="Build", local_path=str(repo))
+    )
+
+    result = WorkspaceService(conn).scan_inventory("ws", "Build")
+
+    assert result["files"] == 2
+    paths = {r["path"] for r in conn.execute(
+        "SELECT path FROM repository_files WHERE repository_id = ?", ("Build",)
+    ).fetchall()}
+    assert paths == {"render.py", "sub/notes.md"}

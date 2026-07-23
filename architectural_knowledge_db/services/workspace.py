@@ -26,7 +26,7 @@ class WorkspaceService:
     def scan_inventory(self, project_id: str, repository_id: str) -> dict[str, Any]:
         repo = self.repositories.get_repository(project_id, repository_id)
         local_path = resolve_local_path_alias(repo["local_path"])
-        files = _git_ls_files(local_path)
+        files = _list_repo_files(local_path)
         head_sha = _git_head(local_path)
         self.conn.execute("DELETE FROM repository_files WHERE repository_id = ?", (repository_id,))
         for path in files:
@@ -108,11 +108,24 @@ class WorkspaceService:
         return str(target)
 
 
-def _git_ls_files(path: str) -> list[str]:
-    out = subprocess.run(
-        ["git", "-C", path, "ls-files"], capture_output=True, text=True, check=True
-    ).stdout
-    return [line.strip().replace("\\", "/") for line in out.splitlines() if line.strip()]
+def _list_repo_files(path: str) -> list[str]:
+    """Inventory a workspace repository's files: prefer `git ls-files` (respects
+    .gitignore, matches the SoR); fall back to a plain recursive filesystem walk for
+    repositories that are not (or not yet) a git checkout in this environment, so a
+    registered-but-non-git repository still gets a real inventory instead of a crash.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "-C", path, "ls-files"], capture_output=True, text=True, check=True
+        ).stdout
+        return [line.strip().replace("\\", "/") for line in out.splitlines() if line.strip()]
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        root = Path(path)
+        return sorted(
+            str(p.relative_to(root)).replace("\\", "/")
+            for p in root.rglob("*")
+            if p.is_file() and ".git" not in p.relative_to(root).parts
+        )
 
 
 def _git_head(path: str) -> str | None:
