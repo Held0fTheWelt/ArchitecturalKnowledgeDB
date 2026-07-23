@@ -1,0 +1,23 @@
+@startuml recall-sequence
+title AKDB Agent-Authoring - Recall Sequence (akdb_recall)
+actor "AI agent" as A
+participant "McpDispatcher" as D
+participant "Cognition.recall" as R
+participant "fts_knowledge\n(alias-folded)" as F
+participant "knowledge_links" as L
+participant "Ranker" as K
+A -> D : tools/call akdb_recall(wording, hops=1)
+D -> R : recall(wording, hops)
+R -> F : MATCH wording (+ folded aliases)
+F --> R : candidate concept item_uids
+alt no match
+  R --> A : {concepts:[], hint:"no match; try remember()"}
+else matched
+  R -> L : links where source in concepts (hops=1)
+  L --> R : neighbours + link_type + target refs
+  R -> K : rank(neighbours) = FTS x authority x recency x confidence
+  K --> R : ordered neighbourhood
+  R --> A : {concept, neighbours:[{ref,summary,link_type,score}], compact}
+end
+note over R : detail="full" expands bodies; hops>1 widens
+@enduml

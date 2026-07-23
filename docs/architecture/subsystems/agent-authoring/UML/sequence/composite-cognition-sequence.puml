@@ -1,0 +1,22 @@
+@startuml composite-cognition-sequence
+title AKDB Agent-Authoring - Composite Cognition (review / check_change / brief, D11)
+actor "AI agent" as A
+participant "Composite" as C
+participant "Completeness" as CP
+participant "Reasoning (tensions/gaps)" as R
+participant "Staleness" as S
+participant "rules" as RU
+A -> C : review(topic|spec)
+C -> CP : completeness(spec?)
+C -> R : tensions(topic) + gaps(topic)
+C -> S : staleness(topic)
+C --> A : one soundness/ready report (blocking vs advisory)
+== guardrail-lint ==
+A -> C : check_change(proposed)
+C -> RU : active rules where applies_to matches
+C -> C : evaluate forbidden_changes against proposed
+C --> A : violations [rule -> offending change]
+== onboarding ==
+A -> C : brief(topic)
+C --> A : narrative: what/why, key ADRs, MVP lineage, open questions, gaps
+@enduml

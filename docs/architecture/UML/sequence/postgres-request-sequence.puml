@@ -1,0 +1,22 @@
+@startuml akdb-postgres-request
+title AKDB - PostgreSQL Request Path
+actor Client
+participant "CLI / API / MCP" as Surface
+participant Service
+participant "Database facade" as Facade
+participant "SQL rewrite" as Rewrite
+database PostgreSQL
+Client -> Surface : operation
+Surface -> Service : shared domain request
+Service -> Facade : SQLite-compatible SQL + ? params
+Facade -> Rewrite : rewrite JSON extraction and binds
+Rewrite --> Facade : PostgreSQL SQL + %s params
+Facade -> PostgreSQL : execute in transaction
+PostgreSQL --> Facade : dict rows / rowcount
+Facade --> Service : sqlite-compatible result
+Service --> Client : domain response
+note over Service,Facade
+Domain services do not select a backend.
+The same service tests run against SQLite and PostgreSQL.
+end note
+@enduml

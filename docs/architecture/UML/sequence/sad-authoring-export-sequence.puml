@@ -1,0 +1,26 @@
+@startuml akdb-sad-export
+title AKDB - DB-Native SAD/UML Authoring and Export
+actor Author
+participant "CLI / API / MCP" as Surface
+participant SadService
+participant UMLService
+participant ImportExportService
+database "Database facade" as DB
+participant "docs/architecture" as Projection
+Author -> Surface : upsert SAD document
+Surface -> SadService : SadDocumentInput
+SadService -> DB : sad + preamble/frontmatter
+loop sections and decisions
+ Author -> Surface : upsert structured child
+ Surface -> SadService : validated child input
+ SadService -> DB : ordered knowledge item
+end
+Author -> Surface : create/update associated diagram
+Surface -> UMLService : diagram source + source_key + SAD id
+UMLService -> DB : diagram, elements, relationships
+Author -> Surface : export SAD project
+Surface -> ImportExportService : export_sad(project, root)
+ImportExportService -> DB : aggregate all SADs + associated UML
+ImportExportService -> Projection : safe hierarchical paths, UTF-8 LF
+ImportExportService --> Author : document/file counts
+@enduml

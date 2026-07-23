@@ -1,0 +1,26 @@
+@startuml akdb-deployment
+title ArchitecturalKnowledgeDB - Deployment Options
+node "Developer workstation" {
+ artifact "akdb CLI / MCP / API" as App1
+ database "SQLite file\n(default, local)" as SQLite
+ App1 --> SQLite
+}
+node "Container / shared environment" {
+ artifact "AKDB application container" as App2
+ database "PostgreSQL 16" as PG
+ App2 --> PG : AKDB_DB_URL
+}
+cloud "Optional semantic service" as Vector
+folder "Read-only registered repositories" as Repos
+folder "Versioned SAD/UML projections" as Projection
+App1 --> Repos : scan
+App2 --> Repos : mounted read-only
+App1 --> Projection : export
+App2 --> Projection : export
+App1 --> Vector : optional
+App2 --> Vector : optional
+note bottom
+SQLite and PostgreSQL are alternatives, not synchronized replicas.
+Backups and lifecycle follow the selected backend's operations guide.
+end note
+@enduml

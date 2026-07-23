@@ -22,10 +22,16 @@ from architectural_knowledge_db.models import (
     ProjectUpsert,
     RepositoryRegistration,
     RuleInput,
+    SadDecisionInput,
+    SadDocumentInput,
+    SadSectionInput,
     SourceAreaInput,
+    UMLDiagramInput,
+    UMLDiagramUpdate,
     UMLElementInput,
     UMLElementUpdate,
     UMLRelationshipInput,
+    UMLRelationshipUpdate,
 )
 from architectural_knowledge_db.services.consistency import ConsistencyService
 from architectural_knowledge_db.services.context import ContextPackBuilder
@@ -35,6 +41,7 @@ from architectural_knowledge_db.services.knowledge import KnowledgeService
 from architectural_knowledge_db.services.origin import OriginService
 from architectural_knowledge_db.services.projects import ProjectService
 from architectural_knowledge_db.services.repositories import RepositoryService
+from architectural_knowledge_db.services.sad import SadService
 from architectural_knowledge_db.services.search import SearchService
 from architectural_knowledge_db.services.setup import StarterSetupService
 from architectural_knowledge_db.services.staleness import StalenessService
@@ -45,7 +52,7 @@ app = typer.Typer(help="ArchitecturalKnowledgeDB local service CLI.")
 project_app = typer.Typer(help="Manage projects and shared spaces.")
 repo_app = typer.Typer(help="Manage source repositories.")
 adr_app = typer.Typer(help="Import, export, and inspect ADRs.")
-sad_app = typer.Typer(help="Export arc42 Software Architecture Documents.")
+sad_app = typer.Typer(help="Author and export arc42 Software Architecture Documents.")
 rule_app = typer.Typer(help="Manage architecture rules.")
 definition_app = typer.Typer(help="Manage definitions.")
 source_area_app = typer.Typer(help="Manage source areas.")
@@ -308,6 +315,138 @@ def export_sad(
         _print(ImportExportService(conn).export_sad(project_id, target, document_local_id))
 
 
+@sad_app.command("list")
+def list_sads(project_id: str = typer.Option(..., "--project")) -> None:
+    with _conn() as conn:
+        _print(SadService(conn).list_documents(project_id))
+
+
+@sad_app.command("get")
+def get_sad(
+    project_id: str = typer.Option(..., "--project"),
+    document_id: str = typer.Option(..., "--document"),
+) -> None:
+    with _conn() as conn:
+        _print(SadService(conn).get_document(project_id, document_id))
+
+
+@sad_app.command("upsert")
+def upsert_sad(
+    project_id: str = typer.Option(..., "--project"),
+    document_id: str = typer.Option(..., "--document"),
+    title: str = typer.Option(..., "--title"),
+    source_key: str = typer.Option("architecture.md", "--source-key"),
+    preamble_md: str | None = typer.Option(None, "--preamble"),
+    frontmatter_json: str | None = typer.Option(
+        None, "--frontmatter-json", help="JSON object stored as SAD frontmatter."
+    ),
+    status: str = typer.Option("current", "--status"),
+    summary: str | None = typer.Option(None, "--summary"),
+) -> None:
+    try:
+        frontmatter = json.loads(frontmatter_json) if frontmatter_json else {}
+    except json.JSONDecodeError as exc:
+        raise typer.BadParameter(f"--frontmatter-json is invalid JSON: {exc.msg}") from exc
+    if not isinstance(frontmatter, dict):
+        raise typer.BadParameter("--frontmatter-json must contain a JSON object.")
+    with _conn() as conn:
+        _print(
+            SadService(conn).upsert_document(
+                project_id,
+                SadDocumentInput(
+                    document_id=document_id,
+                    title=title,
+                    source_key=source_key,
+                    preamble_md=preamble_md,
+                    frontmatter=frontmatter,
+                    status=status,
+                    summary=summary,
+                ),
+            )
+        )
+
+
+@sad_app.command("section-set")
+def set_sad_section(
+    project_id: str = typer.Option(..., "--project"),
+    document_id: str = typer.Option(..., "--document"),
+    section_id: str = typer.Option(..., "--id"),
+    title: str = typer.Option(..., "--title"),
+    order: int = typer.Option(..., "--order"),
+    body_md: str = typer.Option("", "--body"),
+    role: str | None = typer.Option(None, "--role"),
+) -> None:
+    with _conn() as conn:
+        _print(
+            SadService(conn).upsert_section(
+                project_id,
+                SadSectionInput(
+                    document_id=document_id,
+                    section_id=section_id,
+                    title=title,
+                    order=order,
+                    body_md=body_md,
+                    role=role,
+                ),
+            )
+        )
+
+
+@sad_app.command("section-delete")
+def delete_sad_section(
+    project_id: str = typer.Option(..., "--project"),
+    document_id: str = typer.Option(..., "--document"),
+    section_id: str = typer.Option(..., "--id"),
+) -> None:
+    with _conn() as conn:
+        _print(SadService(conn).delete_section(project_id, document_id, section_id))
+
+
+@sad_app.command("decision-set")
+def set_sad_decision(
+    project_id: str = typer.Option(..., "--project"),
+    document_id: str = typer.Option(..., "--document"),
+    decision_id: str = typer.Option(..., "--id"),
+    title: str = typer.Option(..., "--title"),
+    order: int = typer.Option(..., "--order"),
+    status: str = typer.Option("proposed", "--status"),
+    body_md: str = typer.Option("", "--body"),
+) -> None:
+    with _conn() as conn:
+        _print(
+            SadService(conn).upsert_decision(
+                project_id,
+                SadDecisionInput(
+                    document_id=document_id,
+                    decision_id=decision_id,
+                    title=title,
+                    order=order,
+                    status=status,
+                    body_md=body_md,
+                ),
+            )
+        )
+
+
+@sad_app.command("decision-delete")
+def delete_sad_decision(
+    project_id: str = typer.Option(..., "--project"),
+    document_id: str = typer.Option(..., "--document"),
+    decision_id: str = typer.Option(..., "--id"),
+) -> None:
+    with _conn() as conn:
+        _print(SadService(conn).delete_decision(project_id, document_id, decision_id))
+
+
+@sad_app.command("delete")
+def delete_sad(
+    project_id: str = typer.Option(..., "--project"),
+    document_id: str = typer.Option(..., "--document"),
+) -> None:
+    with _conn() as conn:
+        _print(SadService(conn).delete_document(project_id, document_id))
+
+
 @adr_app.command("list")
 def list_adrs(
     project_id: str = typer.Option(..., "--project"),
@@ -502,6 +641,73 @@ def get_uml(
         _print(UMLService(conn).get_diagram(project_id, diagram_id))
 
 
+@uml_app.command("create")
+def create_uml(
+    project_id: str = typer.Option(..., "--project"),
+    diagram_id: str = typer.Option(..., "--diagram"),
+    title: str = typer.Option(..., "--title"),
+    kind: str = typer.Option("unknown", "--kind"),
+    notation: str = typer.Option("plantuml", "--notation"),
+    source_key: str | None = typer.Option(None, "--source-key"),
+    sad_document_id: str | None = typer.Option(None, "--sad-document"),
+    raw_source: str | None = typer.Option(None, "--raw-source"),
+) -> None:
+    with _conn() as conn:
+        _print(
+            UMLService(conn).create_diagram(
+                project_id,
+                UMLDiagramInput(
+                    diagram_id=diagram_id,
+                    title=title,
+                    diagram_kind=kind,
+                    notation=notation,
+                    model={
+                        "source_key": source_key,
+                        "sad_document_id": sad_document_id,
+                    },
+                    raw_source=raw_source,
+                ),
+            )
+        )
+
+
+@uml_app.command("update")
+def update_uml(
+    project_id: str = typer.Option(..., "--project"),
+    diagram_id: str = typer.Option(..., "--diagram"),
+    title: str | None = typer.Option(None, "--title"),
+    kind: str | None = typer.Option(None, "--kind"),
+    notation: str | None = typer.Option(None, "--notation"),
+    source_key: str | None = typer.Option(None, "--source-key"),
+    sad_document_id: str | None = typer.Option(None, "--sad-document"),
+    raw_source: str | None = typer.Option(None, "--raw-source"),
+) -> None:
+    with _conn() as conn:
+        _print(
+            UMLService(conn).update_diagram(
+                project_id,
+                diagram_id,
+                UMLDiagramUpdate(
+                    title=title,
+                    diagram_kind=kind,
+                    notation=notation,
+                    source_key=source_key,
+                    sad_document_id=sad_document_id,
+                    raw_source=raw_source,
+                ),
+            )
+        )
+
+
+@uml_app.command("delete")
+def delete_uml(
+    project_id: str = typer.Option(..., "--project"),
+    diagram_id: str = typer.Option(..., "--diagram"),
+) -> None:
+    with _conn() as conn:
+        _print(UMLService(conn).delete_diagram(project_id, diagram_id))
+
+
 @uml_app.command("element-add")
 def add_uml_element(
     project_id: str = typer.Option(..., "--project"),
@@ -566,6 +772,41 @@ def add_uml_relationship(
                 ),
             )
         )
+
+
+@uml_app.command("element-delete")
+def delete_uml_element(
+    project_id: str = typer.Option(..., "--project"),
+    element_id: str = typer.Option(..., "--id"),
+) -> None:
+    with _conn() as conn:
+        _print(UMLService(conn).delete_element(project_id, element_id))
+
+
+@uml_app.command("relationship-update")
+def update_uml_relationship(
+    project_id: str = typer.Option(..., "--project"),
+    relationship_uid: str = typer.Option(..., "--id"),
+    relationship_type: str | None = typer.Option(None, "--type"),
+    label: str | None = typer.Option(None, "--label"),
+) -> None:
+    with _conn() as conn:
+        _print(
+            UMLService(conn).update_relationship(
+                project_id,
+                relationship_uid,
+                UMLRelationshipUpdate(relationship_type=relationship_type, label=label),
+            )
+        )
+
+
+@uml_app.command("relationship-delete")
+def delete_uml_relationship(
+    project_id: str = typer.Option(..., "--project"),
+    relationship_uid: str = typer.Option(..., "--id"),
+) -> None:
+    with _conn() as conn:
+        _print(UMLService(conn).delete_relationship(project_id, relationship_uid))
 
 
 @origin_app.command("explain")

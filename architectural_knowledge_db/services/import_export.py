@@ -123,21 +123,146 @@ class ImportExportService:
         folder: str | Path,
         document_local_id: str | None = None,
     ) -> dict[str, Any]:
+        from architectural_knowledge_db.services.sad import SadService
+        from architectural_knowledge_db.services.uml import UMLService, safe_filename
+
         root = Path(folder)
         root.mkdir(parents=True, exist_ok=True)
-        frontmatter = self._sad_children(project_id, "sad_frontmatter", document_local_id)
-        preambles = self._sad_children(project_id, "sad_preamble", document_local_id)
-        sections = sorted(
-            self._sad_children(project_id, "sad_section", document_local_id),
-            key=lambda it: (it.get("metadata") or {}).get("order", 0),
+        sad = SadService(self.conn)
+        all_documents = sad.list_documents(project_id)
+        documents = all_documents
+        if document_local_id is not None:
+            documents = [
+                item
+                for item in documents
+                if item["local_id"] == document_local_id
+                or (item.get("metadata") or {}).get("source_key", "").endswith(document_local_id)
+            ]
+        if not documents:
+            raise ValueError(
+                f"No SAD document found in project {project_id}"
+                + (f" for {document_local_id}" if document_local_id else "")
+            )
+
+        exported: list[str] = []
+        reserved_targets: dict[str, str] = {}
+        selected_document_ids: set[str] = set()
+        for document_item in documents:
+            document = sad.get_document(project_id, document_item["local_id"])
+            selected_document_ids.add(document["local_id"])
+            source_key = (document.get("metadata") or {}).get("source_key") or "architecture.md"
+            target = _target_for_source_key(root, source_key, "architecture.md")
+            self._reserve_sad_export_target(root, target, document["local_id"], reserved_targets)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            self._render_sad_document(document, target)
+            exported.append(str(target))
+
+        uml = UMLService(self.conn)
+        diagrams = uml.list_diagrams(project_id, limit=5000)
+        unassigned_to_only_document = len(all_documents) == 1
+        for diagram in diagrams:
+            model = diagram.get("model") or {}
+            assigned_document = model.get("sad_document_id")
+            if assigned_document:
+                if assigned_document not in selected_document_ids:
+                    continue
+            elif not unassigned_to_only_document:
+                continue
+            source_key = model.get("source_key") or f"UML/{safe_filename(diagram['diagram_id'])}.puml"
+            target = _target_for_source_key(
+                root, source_key, f"UML/{safe_filename(diagram['diagram_id'])}.puml"
+            )
+            self._reserve_sad_export_target(
+                root, target, diagram["diagram_id"], reserved_targets
+            )
+            target.parent.mkdir(parents=True, exist_ok=True)
+            _write_text_exact(target, uml.render_diagram(project_id, diagram["diagram_id"]))
+            exported.append(str(target))
+
+        manifest_path: Path | None = None
+        if document_local_id is None:
+            manifest_path = self._write_sad_export_manifest(
+                project_id, root, exported
+            )
+        return {
+            "project_id": project_id,
+            "folder": str(root),
+            "documents": len(documents),
+            "exported": len(exported),
+            "files": exported,
+            "manifest": str(manifest_path) if manifest_path is not None else None,
+        }
+
+    @staticmethod
+    def _reserve_sad_export_target(
+        root: Path, target: Path, owner: str, reserved: dict[str, str]
+    ) -> None:
+        relative = target.relative_to(root).as_posix()
+        key = relative.casefold()
+        previous = reserved.get(key)
+        if previous is not None:
+            raise ValueError(
+                f"SAD export path collision for {relative}: {previous} and {owner}"
+            )
+        reserved[key] = owner
+
+    @staticmethod
+    def _write_sad_export_manifest(
+        project_id: str, root: Path, exported: list[str]
+    ) -> Path:
+        manifest_path = root / ".akdb-sad-export.json"
+        current = sorted(
+            Path(path).relative_to(root).as_posix() for path in exported
         )
-        decisions = sorted(
-            self._sad_children(project_id, "sad_decision", document_local_id),
-            key=lambda it: (
-                (it.get("metadata") or {}).get("order", 5000),
-                (it.get("metadata") or {}).get("decision_id", ""),
-            ),
+        previous: list[str] = []
+        if manifest_path.is_file():
+            try:
+                payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                payload = {}
+            if payload.get("project_id") == project_id:
+                previous = [
+                    value for value in payload.get("files", []) if isinstance(value, str)
+                ]
+        current_keys = {value.casefold() for value in current}
+        for stale in previous:
+            if stale.casefold() in current_keys:
+                continue
+            candidate = PurePosixPath(stale.replace("\\", "/"))
+            if (
+                candidate.is_absolute()
+                or not candidate.parts
+                or any(part in {"", ".", ".."} or ":" in part for part in candidate.parts)
+            ):
+                continue
+            target = root / Path(*candidate.parts)
+            if target.is_file():
+                target.unlink()
+                parent = target.parent
+                while parent != root and parent.is_dir() and not any(parent.iterdir()):
+                    parent.rmdir()
+                    parent = parent.parent
+        _write_text_exact(
+            manifest_path,
+            json.dumps(
+                {
+                    "format_version": 1,
+                    "project_id": project_id,
+                    "files": current,
+                },
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
         )
+        return manifest_path
+
+    def _render_sad_document(self, document: dict[str, Any], target: Path) -> None:
+        frontmatter = document.get("frontmatter") or []
+        preambles = document.get("preamble") or []
+        sections = document.get("sections") or []
+        decisions = document.get("decisions") or []
         lines: list[str] = []
         if frontmatter:
             front = (frontmatter[0].get("metadata") or {}).get("frontmatter")
@@ -182,11 +307,7 @@ class ImportExportService:
             else:
                 lines += [(md.get("body_md") or "").strip("\n"), ""]
         text = "\n".join(lines).rstrip("\n") + "\n"
-        (root / "architecture.md").write_text(text, encoding="utf-8", newline="\n")
-        from architectural_knowledge_db.services.uml import UMLService
-
-        UMLService(self.conn).export_diagrams(project_id, root / "UML")
-        return {"project_id": project_id, "folder": str(root), "files": ["architecture.md"]}
+        target.write_text(text, encoding="utf-8", newline="\n")
 
     def import_documents(
         self,

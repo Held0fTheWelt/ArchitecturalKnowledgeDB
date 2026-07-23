@@ -1,0 +1,99 @@
+@startuml agent-authoring-data-model
+title AKDB Agent-Authoring - Data Model
+class knowledge_items {
+ item_uid <<PK>>
+ project_id
+ item_type
+ local_id
+ authority_level
+ source_uri
+ metadata_json
+}
+class topics {
+ item_uid <<PK,FK>>
+ topic_id
+ lifecycle
+}
+class mvps {
+ item_uid <<PK,FK>>
+ mvp_id
+ seq
+ lifecycle
+ intent_md
+}
+class specs {
+ item_uid <<PK,FK>>
+ spec_id
+ archetype
+ lifecycle
+ mvp_uid
+ sections_json
+}
+class questions {
+ item_uid <<PK,FK>>
+ question_id
+ status
+}
+class knowledge_links {
+ link_uid <<PK>>
+ source_item_uid
+ target_ref
+ link_type
+ confidence
+}
+class fts_knowledge {
+ item_uid
+ title
+ body
+}
+class item_memory {
+ item_uid <<PK,FK>>
+ use_count
+ last_used_at
+ pinned
+ salience
+}
+class item_embeddings {
+ item_uid
+ model
+ dim
+ vector
+ content_hash
+}
+class uml_diagrams {
+ diagram_uid
+ diagram_id
+ model_json
+}
+class uml_elements {
+ element_uid
+ element_id
+ element_type
+}
+class sad_document <<knowledge_item>>
+class sad_section <<knowledge_item>>
+class sad_decision <<knowledge_item>>
+knowledge_items <|-- topics
+knowledge_items <|-- mvps
+knowledge_items <|-- specs
+knowledge_items <|-- questions
+knowledge_items <|-- sad_document
+knowledge_items <|-- sad_section
+knowledge_items <|-- sad_decision
+knowledge_items "1" -- "0..1" item_memory
+knowledge_items "1" -- "0..*" item_embeddings
+knowledge_items "1" -- "1" fts_knowledge
+knowledge_items "1" --> "*" knowledge_links : source
+specs "*" --> "1" mvps
+mvps ..> topics : mvp_touches_topic
+specs ..> topics : spec_about_topic
+specs ..> uml_diagrams : spec_realizes_uml
+uml_diagrams "1" o-- "*" uml_elements
+uml_elements ..> knowledge_links : maps_to_file
+sad_document "1" o-- "*" sad_section
+sad_document "1" o-- "*" sad_decision
+note bottom of knowledge_links
+Typed edges also represent aliases, predecessors,
+questions, working sets, mappings and provenance.
+end note
+@enduml

@@ -1,0 +1,37 @@
+@startuml use-cases
+left to right direction
+title AKDB Agent-Authoring Data Model - Use Cases
+actor "AI agent\n(MCP client)" as Agent
+actor "Human maintainer" as Human
+rectangle "AKDB agent-authoring" {
+  usecase "Recall: what do I know about X" as UC1
+  usecase "Explore: follow a thread\n(chosen link types)" as UC2
+  usecase "Remember: add wording / note" as UC3
+  usecase "Propose / dedup a topic" as UC4
+  usecase "Create MVP (changelog entry)" as UC5
+  usecase "Author spec (archetype)" as UC6
+  usecase "Validate spec -> ready (gated)" as UC7
+  usecase "Map UML element -> file" as UC8
+  usecase "View roadmap / topic timeline" as UC9
+  usecase "Survey the environment" as UC10
+  usecase "Export rulebook + roadmap" as UC11
+  usecase "Curate topics / decide / release" as UC12
+}
+Agent --> UC1
+Agent --> UC2
+Agent --> UC3
+Agent --> UC4
+Agent --> UC5
+Agent --> UC6
+Agent --> UC7
+Agent --> UC8
+Agent --> UC9
+Agent --> UC10
+Human --> UC11
+Human --> UC12
+UC6 ..> UC7 : <<gated by completeness>>
+UC7 ..> UC8 : <<requires file-map>>
+UC5 ..> UC4 : <<attaches topic>>
+UC5 ..> UC9 : <<auto-suggest predecessor>>
+UC1 ..> UC3 : <<grows corpus>>
+@enduml

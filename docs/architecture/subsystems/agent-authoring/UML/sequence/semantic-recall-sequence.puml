@@ -1,0 +1,47 @@
+@startuml semantic-recall-sequence
+title AKDB Agent-Authoring - Semantic Recall via LLMStore/IIS bridge (D10, MVP-6)
+actor "AI agent" as A
+participant "McpDispatcher\n(_backend_from_env)" as D
+participant "Cognition.recall" as R
+participant "FtsBackend" as F
+participant "VectorBackend" as V
+participant "EmbeddingClient\n(LLMStoreEmbeddingClient)" as E
+participant "item_embeddings" as IE
+database "LLMStore/IIS bridge\n(AKDB_EMBED_URL)" as B
+
+== one-time / on source change: build embeddings ==
+A -> D : tools/call akdb_embed_project(project_id)
+alt no backend (AKDB_RECALL_BACKEND/AKDB_EMBED_URL unset)
+  D --> A : {embedded:0, backend:"none"}   (FTS stays default)
+else vector/hybrid configured
+  D -> V : embed_project(project_id)
+  loop each knowledge_item (title + summary)
+    V -> E : embed([text])
+    E -> B : POST {model, input:[text]}
+    B --> E : {data:[{embedding:[...]}]} | {embeddings:[[...]]}
+    E --> V : vector
+    V -> IE : upsert (model, dim, struct.pack f32 BLOB)
+  end
+  D --> A : {embedded:N, backend:"vector"}
+end
+
+== query time: hybrid recall ==
+A -> D : tools/call akdb_recall(query, semantic=true, spaces?)
+D -> R : recall(RecallRequest(semantic, spaces))
+alt semantic and backend present
+  R -> F : resolve(query, spaces, limit)        ' lexical
+  F --> R : [(uid, 1/(1+pos))]
+  R -> V : resolve(query, spaces, limit)         ' semantic
+  V -> E : embed([query])
+  E -> B : POST {model, input:[query]}
+  B --> E : query vector
+  E --> V : query vector
+  V -> IE : read vectors for items in scoped spaces
+  V --> R : [(uid, cosine)]
+  R -> R : union scores (max per uid) -> top-limit hits
+else semantic but no backend  (graceful degradation)
+  R -> F : SearchService FTS only  (== MVP-1 behaviour)
+end
+R --> A : {concepts, neighbours}  (MVP-5 authority x salience x recency ranking)
+note over E,B : network/parse error -> RuntimeError -> dispatcher isError; recall path stays FTS-safe
+@enduml

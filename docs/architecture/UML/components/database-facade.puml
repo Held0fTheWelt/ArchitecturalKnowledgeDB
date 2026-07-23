@@ -1,0 +1,21 @@
+@startuml akdb-database-facade
+title AKDB - Database Facade
+component "Services" as Services
+component "connect / managed_connection" as Connection
+component "Database facade" as Facade
+component "SQL compatibility rewrites" as Rewrite
+component "Migration runner" as Migrations
+database "sqlite3" as SQLite
+database "psycopg / PostgreSQL" as PG
+Services --> Facade : execute, executescript, commit
+Connection --> SQLite : AKDB_DATABASE_PATH
+Connection --> PG : AKDB_DB_URL
+Facade --> Rewrite : PostgreSQL only
+Rewrite --> PG : qmark?pyformat, JSON extract rewrite
+Facade --> SQLite : native SQL
+Migrations --> Facade : ordered additive schemas
+note bottom of Facade
+Backend branching is confined to db/connection.py,
+db/database.py, schema selection and documented service seams.
+end note
+@enduml

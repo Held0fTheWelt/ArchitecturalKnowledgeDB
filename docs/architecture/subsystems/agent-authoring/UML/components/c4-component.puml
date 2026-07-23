@@ -1,0 +1,48 @@
+@startuml agent-authoring-components
+title AKDB Agent-Authoring - Service Components
+package "Cognition" {
+ component CognitionService
+ component MemoryService
+ component FtsBackend
+ component VectorBackend
+ component EmbeddingClient
+}
+package "Structured authoring" {
+ component AuthoringService
+ component CompletenessService
+ component RoadmapService
+ component SurveyService
+}
+package "Reasoning and assurance" {
+ component ReasoningService
+ component ReviewService
+ component GuardrailService
+}
+package "Architecture records" {
+ component SadService
+ component UMLService
+ component ImportExportService
+}
+component KnowledgeService
+component "Database facade" as DB
+CognitionService --> FtsBackend
+CognitionService --> VectorBackend : optional
+CognitionService --> MemoryService
+VectorBackend --> EmbeddingClient
+CognitionService --> KnowledgeService
+AuthoringService --> CompletenessService
+AuthoringService --> KnowledgeService
+RoadmapService --> KnowledgeService
+SurveyService --> CognitionService
+ReasoningService --> KnowledgeService
+ReviewService --> CompletenessService
+ReviewService --> ReasoningService
+GuardrailService --> KnowledgeService
+SadService --> KnowledgeService
+ImportExportService --> SadService
+ImportExportService --> UMLService
+KnowledgeService --> DB
+UMLService --> DB
+MemoryService --> DB
+VectorBackend --> DB
+@enduml

@@ -1,0 +1,16 @@
+@startuml adaptive-ranking-activity
+title AKDB Agent-Authoring - Adaptive Ranking & Memory (D9)
+start
+:recall resolves candidates (FTS + aliases, optional vector);
+:for each candidate read item_memory (use_count, last_used, pinned, salience);
+:score = FTS x authority x recency x confidence x salience;
+if (pinned?) then (yes)
+  :apply pin boost (guardrails stay on top);
+else (no)
+endif
+:order by score; return ranked neighbourhood with provenance + anchors;
+:agent follows / uses some neighbours;
+:reinforce salience + use_count, set last_used_at (item_memory);
+note right: periodic/background: salience decays with time-since-use;\npinned items never decay out
+stop
+@enduml

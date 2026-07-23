@@ -1,0 +1,16 @@
+@startuml mvp-lifecycle-states
+title AKDB Agent-Authoring - MVP Lifecycle States
+[*] --> planned
+planned : seq assigned (monotonic); attached to topic(s)
+planned --> in_progress : work starts
+in_progress --> shipped : increment delivered (shipped_at set)
+shipped : appears in generated changelog at its seq
+shipped --> superseded : a later MVP supersedes (mvp_supersedes)
+planned --> superseded : dropped before work
+in_progress --> superseded : abandoned
+superseded --> [*]
+note right of shipped
+  Temporal order = seq / shipped_at
+  Contextual order = mvp_touches_topic + mvp_* edges
+end note
+@enduml

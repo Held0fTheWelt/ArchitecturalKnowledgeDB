@@ -1,0 +1,63 @@
+@startuml akdb-data-model
+title ArchitecturalKnowledgeDB - Core Knowledge Data Model
+class Project {
+ project_id
+}
+class Repository {
+ repository_id
+ local_path
+ scan_policy
+}
+class KnowledgeItem {
+ item_uid
+ item_type
+ local_id
+ authority_level
+ source_uri
+ metadata_json
+}
+class KnowledgeLink {
+ source_item_uid
+ target_ref
+ link_type
+}
+class UMLDiagram {
+ diagram_uid
+ diagram_id
+ notation
+ diagram_kind
+ model_json
+ raw_source
+}
+class UMLElement {
+ element_uid
+ element_id
+ element_type
+}
+class UMLRelationship {
+ relationship_uid
+ relationship_type
+}
+class Finding {
+ finding_uid
+ finding_type
+ severity
+}
+class Commit {
+ commit_uid
+ hash
+}
+Project "1" *-- "*" Repository
+Project "1" *-- "*" KnowledgeItem
+Project "1" *-- "*" UMLDiagram
+Project "1" *-- "*" Finding
+Repository "1" *-- "*" Commit
+KnowledgeItem "1" --> "*" KnowledgeLink
+UMLDiagram "1" *-- "*" UMLElement
+UMLDiagram "1" *-- "*" UMLRelationship
+note right of KnowledgeItem
+SAD documents, preamble, frontmatter,
+sections and decisions share this spine.
+Parent identity and order live in metadata_json.
+end note
+@enduml

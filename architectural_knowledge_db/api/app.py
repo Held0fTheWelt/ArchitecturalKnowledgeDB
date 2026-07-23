@@ -22,11 +22,17 @@ from architectural_knowledge_db.models import (
     ProjectUpsert,
     RepositoryRegistration,
     RuleInput,
+    SadDecisionInput,
+    SadDocumentInput,
+    SadSectionInput,
     SearchRequest,
     SourceAreaInput,
+    UMLDiagramInput,
+    UMLDiagramUpdate,
     UMLElementInput,
     UMLElementUpdate,
     UMLRelationshipInput,
+    UMLRelationshipUpdate,
 )
 from architectural_knowledge_db.services.consistency import ConsistencyService
 from architectural_knowledge_db.services.context import ContextPackBuilder
@@ -36,6 +42,7 @@ from architectural_knowledge_db.services.knowledge import KnowledgeService
 from architectural_knowledge_db.services.origin import OriginService
 from architectural_knowledge_db.services.projects import ProjectService
 from architectural_knowledge_db.services.repositories import RepositoryService
+from architectural_knowledge_db.services.sad import SadService
 from architectural_knowledge_db.services.search import SearchService
 from architectural_knowledge_db.services.staleness import StalenessService
 from architectural_knowledge_db.services.uml import UMLService
@@ -297,6 +304,88 @@ def create_app() -> FastAPI:
     ) -> dict[str, Any]:
         return _run(lambda: ImportExportService(conn).export_adrs(project_id, folder))
 
+    @app.get("/projects/{project_id}/sads")
+    def list_sads(
+        project_id: str,
+        conn: Annotated[sqlite3.Connection, Depends(get_connection)],
+    ) -> list[dict[str, Any]]:
+        return _run(lambda: SadService(conn).list_documents(project_id))
+
+    @app.get("/projects/{project_id}/sads/{document_id}")
+    def get_sad(
+        project_id: str,
+        document_id: str,
+        conn: Annotated[sqlite3.Connection, Depends(get_connection)],
+    ) -> dict[str, Any]:
+        return _run(lambda: SadService(conn).get_document(project_id, document_id))
+
+    @app.put("/projects/{project_id}/sads/{document_id}")
+    def upsert_sad(
+        project_id: str,
+        document_id: str,
+        request: SadDocumentInput,
+        conn: Annotated[sqlite3.Connection, Depends(get_connection)],
+    ) -> dict[str, Any]:
+        payload = request.model_copy(update={"document_id": document_id})
+        return _run(lambda: SadService(conn).upsert_document(project_id, payload))
+
+    @app.put("/projects/{project_id}/sads/{document_id}/sections/{section_id}")
+    def upsert_sad_section(
+        project_id: str,
+        document_id: str,
+        section_id: str,
+        request: SadSectionInput,
+        conn: Annotated[sqlite3.Connection, Depends(get_connection)],
+    ) -> dict[str, Any]:
+        payload = request.model_copy(update={"document_id": document_id, "section_id": section_id})
+        return _run(lambda: SadService(conn).upsert_section(project_id, payload))
+
+    @app.delete("/projects/{project_id}/sads/{document_id}/sections/{section_id}")
+    def delete_sad_section(
+        project_id: str,
+        document_id: str,
+        section_id: str,
+        conn: Annotated[sqlite3.Connection, Depends(get_connection)],
+    ) -> dict[str, Any]:
+        return _run(lambda: SadService(conn).delete_section(project_id, document_id, section_id))
+
+    @app.put("/projects/{project_id}/sads/{document_id}/decisions/{decision_id}")
+    def upsert_sad_decision(
+        project_id: str,
+        document_id: str,
+        decision_id: str,
+        request: SadDecisionInput,
+        conn: Annotated[sqlite3.Connection, Depends(get_connection)],
+    ) -> dict[str, Any]:
+        payload = request.model_copy(update={"document_id": document_id, "decision_id": decision_id})
+        return _run(lambda: SadService(conn).upsert_decision(project_id, payload))
+
+    @app.delete("/projects/{project_id}/sads/{document_id}/decisions/{decision_id}")
+    def delete_sad_decision(
+        project_id: str,
+        document_id: str,
+        decision_id: str,
+        conn: Annotated[sqlite3.Connection, Depends(get_connection)],
+    ) -> dict[str, Any]:
+        return _run(lambda: SadService(conn).delete_decision(project_id, document_id, decision_id))
+
+    @app.delete("/projects/{project_id}/sads/{document_id}")
+    def delete_sad(
+        project_id: str,
+        document_id: str,
+        conn: Annotated[sqlite3.Connection, Depends(get_connection)],
+    ) -> dict[str, Any]:
+        return _run(lambda: SadService(conn).delete_document(project_id, document_id))
+
+    @app.post("/projects/{project_id}/sads/export")
+    def export_sads(
+        project_id: str,
+        folder: str,
+        conn: Annotated[sqlite3.Connection, Depends(get_connection)],
+        document_id: str | None = None,
+    ) -> dict[str, Any]:
+        return _run(lambda: ImportExportService(conn).export_sad(project_id, folder, document_id))
+
     @app.post("/projects/{project_id}/uml/import")
     def import_uml(
         project_id: str,
@@ -330,6 +419,31 @@ def create_app() -> FastAPI:
     ) -> dict[str, Any]:
         return _run(lambda: UMLService(conn).get_diagram(project_id, diagram_id))
 
+    @app.post("/projects/{project_id}/uml/diagrams")
+    def create_diagram(
+        project_id: str,
+        request: UMLDiagramInput,
+        conn: Annotated[sqlite3.Connection, Depends(get_connection)],
+    ) -> dict[str, Any]:
+        return _run(lambda: UMLService(conn).create_diagram(project_id, request))
+
+    @app.patch("/projects/{project_id}/uml/diagrams/{diagram_id}")
+    def update_diagram(
+        project_id: str,
+        diagram_id: str,
+        request: UMLDiagramUpdate,
+        conn: Annotated[sqlite3.Connection, Depends(get_connection)],
+    ) -> dict[str, Any]:
+        return _run(lambda: UMLService(conn).update_diagram(project_id, diagram_id, request))
+
+    @app.delete("/projects/{project_id}/uml/diagrams/{diagram_id}")
+    def delete_diagram(
+        project_id: str,
+        diagram_id: str,
+        conn: Annotated[sqlite3.Connection, Depends(get_connection)],
+    ) -> dict[str, Any]:
+        return _run(lambda: UMLService(conn).delete_diagram(project_id, diagram_id))
+
     @app.post("/projects/{project_id}/uml/elements")
     def add_uml_element(
         project_id: str,
@@ -347,6 +461,14 @@ def create_app() -> FastAPI:
     ) -> dict[str, Any]:
         return _run(lambda: UMLService(conn).update_element(project_id, element_id, request))
 
+    @app.delete("/projects/{project_id}/uml/elements/{element_id}")
+    def delete_uml_element(
+        project_id: str,
+        element_id: str,
+        conn: Annotated[sqlite3.Connection, Depends(get_connection)],
+    ) -> dict[str, Any]:
+        return _run(lambda: UMLService(conn).delete_element(project_id, element_id))
+
     @app.post("/projects/{project_id}/uml/relationships")
     def add_uml_relationship(
         project_id: str,
@@ -354,6 +476,23 @@ def create_app() -> FastAPI:
         conn: Annotated[sqlite3.Connection, Depends(get_connection)],
     ) -> dict[str, Any]:
         return _run(lambda: UMLService(conn).add_relationship(project_id, request))
+
+    @app.patch("/projects/{project_id}/uml/relationships/{relationship_uid}")
+    def update_uml_relationship(
+        project_id: str,
+        relationship_uid: str,
+        request: UMLRelationshipUpdate,
+        conn: Annotated[sqlite3.Connection, Depends(get_connection)],
+    ) -> dict[str, Any]:
+        return _run(lambda: UMLService(conn).update_relationship(project_id, relationship_uid, request))
+
+    @app.delete("/projects/{project_id}/uml/relationships/{relationship_uid}")
+    def delete_uml_relationship(
+        project_id: str,
+        relationship_uid: str,
+        conn: Annotated[sqlite3.Connection, Depends(get_connection)],
+    ) -> dict[str, Any]:
+        return _run(lambda: UMLService(conn).delete_relationship(project_id, relationship_uid))
 
     @app.post("/projects/{project_id}/consistency/check")
     def check_consistency(

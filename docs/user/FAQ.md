@@ -14,11 +14,14 @@ No. Repository scanning is read-only.
 
 ## Where should Tiny Tools SAD and UML live?
 
-In the Tiny Tool workspace, cross-project SAD/UML authority lives in `D:\TinyToolDevelopment\Git\docs` and `D:\TinyToolDevelopment\Git\UML`. AKDB can index it, but AKDB is not the authority folder for those files.
+AKDB's own SAD/UML is authored in the `architectural-knowledge-db` database project and exported
+to this repository's `docs/architecture`. Other tools and platform-wide architecture remain owned
+by their respective repositories; AKDB may index or relate them without copying their authority.
 
 ## Where do user-facing showcase scripts live?
 
-In the Tiny Tool workspace, public showcase/user scripts live under `D:\TinyToolDevelopment\Git\Tools`, with user scripts under `D:\TinyToolDevelopment\Git\Tools\User`.
+In the repository that owns the showcased tool. Tiny Tool Observatory may discover or present it,
+but neither AKDB nor the Observatory should become an accidental source-code copy.
 
 ## Can agents use AKDB?
 
@@ -26,4 +29,6 @@ Yes. Agents can use CLI commands, HTTP endpoints, or the `akdb-mcp` stdio server
 
 ## What should I commit?
 
-Commit source code, tests, AKDB docs, contracts, schema, examples, and AKDB-owned specs. Do not commit `.akdb/`, `Temp/`, `exports/`, live SQLite files, or generated imports from other repositories.
+Commit source code, tests, AKDB docs, contracts, schema, examples, and the generated projection of
+AKDB-owned SAD/UML. Do not commit `.akdb/`, `Temp/`, `exports/`, live databases, backups,
+embeddings, imported corpora, or exports owned by other repositories.

@@ -1,29 +1,29 @@
-@startuml architecturalknowledgedb-traceability
-title ArchitecturalKnowledgeDB Traceability
-caption Governed traceability matrix for the AKDB Outer Tool SAD
-
-note as CoverageMap
-  **Coverage Map**
-  |=Mechanism |= Proof State |= Code Evidence |= Test Evidence |= Decision Evidence |= Notes |
-  | Outer Tool boundary | Accepted | ArchitecturalKnowledgeDB/README.md | Documentation review | SAD D1 | Standalone Python tool; no Unreal plugin or Fab package. |
-  | Source authority split | Accepted | README repository boundary, docs/architecture README | Reingest/search checks | SAD D2 | Git/docs and Git/UML remain normative; AKDB indexes them. |
-  | CLI/API/MCP shared service | Implemented | cli.py, api/app.py, mcp.py, mcp_stdio.py | test_api.py, test_mcp_stdio.py | SAD D3 | One service model exposed through multiple local interfaces. |
-  | Project-aware SQLite knowledge store | Implemented | db/schema/*.sql, services/projects.py, services/knowledge.py | test_project_isolation.py, test_import_export.py | SAD D2, D3 | Every project-scoped record carries project identity. |
-  | Read-only Git provenance | Implemented | services/repositories.py, services/git_scanner.py | test_git_scanner.py | SAD D4 | Stores selected metadata; does not mutate repositories. |
-  | Search, context, consistency, staleness | Implemented | services/search.py, context.py, consistency.py, staleness.py | test_context_pack.py, test_consistency.py, test_staleness.py | SAD D2 | Retrieval and drift evidence stay source-anchored. |
-  | Compact MCP agent surface | Implemented | mcp.py, mcp_stdio.py | test_mcp_compact.py, test_mcp_stdio.py | SAD D3 | Bulk/list/search tools default to compact output; full detail is explicit. |
-  | Reingest and optional semantic recall | Implemented | services/reingest.py, recall_backend.py | test_reingest.py, test_semantic.py, test_semantic_hardening.py | SAD D2, D3 | Refreshes DB from source folders; FTS remains baseline. |
-  | Agent-authoring/cognition extension | Implemented/extended | services/cognition.py, authoring.py, roadmap.py, recall_backend.py | test_cognition.py, test_authoring.py, test_roadmap.py, test_semantic.py | Project AKDB agent-authoring SAD | Deep data-model details live in UML/Project/akdb-agent-authoring. |
-  | Website and Atlas projection | Implemented/curated | product-facts.yml, Website content parts | Website facts_loader, product_art, atlas integrity tests | SAD D5 | AKDB is featured as an Outer Tool; website is presentation, not runtime authority. |
-end note
-
+@startuml akdb-traceability
+title ArchitecturalKnowledgeDB - Architecture Traceability
+left to right direction
+rectangle "SAD root\narchitecture.md" as Root
+rectangle "Agent-authoring SAD\nsubsystems/agent-authoring" as Child
+rectangle "DB facade + schemas" as DB
+rectangle "CLI / API / MCP" as Surfaces
+rectangle "SAD/UML services" as Authoring
+rectangle "Search / context / cognition" as Recall
+rectangle "Git scan / reingest" as Provenance
+rectangle "Deterministic export" as Export
+Root --> DB : D-DB
+Root --> Authoring : D-SAD
+Root --> Export : D-SoR / D-MULTI
+Root --> Surfaces : D3
+Root --> Provenance : D4
+Child --> Authoring : D1-D8
+Child --> Recall : D9-D11
+Surfaces --> Authoring
+Surfaces --> Recall
+Authoring --> DB
+Recall --> DB
+Provenance --> DB
+DB --> Export
 note bottom
-  **Drift Checks**
-  - If AKDB starts writing to registered repositories by default, update SAD D4 before implementation.
-  - If product or website text implies AKDB is a Fab/Unreal plugin, correct the category to Outer Tools.
-  - If agents treat database rows as stronger than owning SAD/UML/ADR files, update context-pack ranking or source-anchor text.
-  - If AIaGMW imports directly into AKDB instead of reviewable workspace patches and Git/UML publication, revisit both SADs.
-  - If deploy builds list only AIaGMW under Outer Tools, refresh the website snapshot and literal catalog entries.
+Code: sad.py, uml.py, import_export.py, database.py, connection.py, cli.py, app.py, mcp.py.
+Tests: test_sad_authoring.py, test_uml.py, test_export_sad_cli.py, API/MCP and PostgreSQL suite.
 end note
-
 @enduml

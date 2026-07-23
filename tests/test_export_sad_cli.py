@@ -58,3 +58,44 @@ def test_cli_sad_export_uses_self_export_default(tmp_path: Path, monkeypatch) ->
     out = repo / "docs" / "architecture" / "architecture.md"
     assert out.is_file()
     assert "## 1. Introduction" in out.read_text(encoding="utf-8")
+
+
+def test_cli_authors_sad_directly_in_database(tmp_path: Path, monkeypatch) -> None:
+    db = tmp_path / "cli-author.sqlite"
+    monkeypatch.setenv("AKDB_DATABASE_PATH", str(db))
+    runner = CliRunner()
+    conn = initialize_database(db)
+    ProjectService(conn).upsert_project(ProjectUpsert(project_id="p", display_name="P"))
+    conn.commit()
+    conn.close()
+
+    assert runner.invoke(
+        app,
+        [
+            "sad", "upsert", "--project", "p", "--document", "root", "--title", "Root",
+            "--preamble", "# Root", "--frontmatter-json", '{"id":"SAD-P"}',
+        ],
+    ).exit_code == 0
+    assert runner.invoke(
+        app,
+        [
+            "sad", "section-set", "--project", "p", "--document", "root", "--id", "intro",
+            "--title", "1. Introduction", "--order", "0", "--body", "Direct DB authoring.",
+        ],
+    ).exit_code == 0
+    assert runner.invoke(
+        app,
+        [
+            "uml", "create", "--project", "p", "--diagram", "context",
+            "--title", "Context", "--kind", "component",
+            "--source-key", "UML/context.puml", "--sad-document", "root",
+            "--raw-source", "@startuml\ncomponent Context\n@enduml\n",
+        ],
+    ).exit_code == 0
+    out = tmp_path / "out"
+    result = runner.invoke(app, ["sad", "export", "--project", "p", "--folder", str(out)])
+    assert result.exit_code == 0, result.output
+    architecture = (out / "architecture.md").read_text(encoding="utf-8")
+    assert "id: SAD-P" in architecture
+    assert "Direct DB authoring." in architecture
+    assert "component Context" in (out / "UML" / "context.puml").read_text(encoding="utf-8")

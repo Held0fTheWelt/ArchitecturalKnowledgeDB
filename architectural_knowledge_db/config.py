@@ -57,7 +57,7 @@ def _auto_export_root(data_root: Path, database_path: Path) -> Path | None:
         return Path(explicit).expanduser().resolve()
     if _truthy(os.getenv("AKDB_AUTO_EXPORT")):
         return (data_root / "exports").resolve()
-    return _workspace_auto_export_root(data_root, database_path)
+    return None
 
 
 def auto_export_root_for_database(database_path: Path | str) -> Path | None:
@@ -77,16 +77,14 @@ def self_export_target(
 ) -> Path | None:
     """Default arc42/SAD export folder for known AKDB workspace layouts.
 
-    - Standalone AKDB repo + project ``architectural-knowledge-db`` → ``<repo>/docs/architecture``
-    - Platform ``Tools/ArchitecturalKnowledgeDB`` layout → ``<workspace>/AKDB/export``
+    Standalone AKDB repo + project ``architectural-knowledge-db`` maps to
+    ``<repo>/docs/architecture``.
     Explicit ``--folder`` / env roots remain authoritative when callers supply them.
     """
     layout = _workspace_layout(data_root, database_path)
     if layout is None:
         return None
-    kind, repo, workspace = layout
-    if kind == "platform":
-        return (workspace / "AKDB" / "export").resolve()
+    kind, repo, _workspace = layout
     if kind == "standalone" and project_id == AKDB_SELF_PROJECT_ID:
         return (repo / "docs" / "architecture").resolve()
     return None
@@ -115,20 +113,9 @@ def _workspace_layout(
     if repo.name != "ArchitecturalKnowledgeDB":
         return None
     if repo.parent.name == "Tools":
-        workspace = repo.parent.parent
-        if workspace.name != "TinyToolDevelopment":
-            return None
-        return ("platform", repo, workspace)
+        return None
     # Standalone public AKDB checkout (e.g. TinyToolDevelopment/ArchitecturalKnowledgeDB).
     return ("standalone", repo, repo.parent)
-
-
-def _workspace_auto_export_root(data_root: Path, database_path: Path) -> Path | None:
-    layout = _workspace_layout(data_root, database_path)
-    if layout is None or layout[0] != "platform":
-        return None
-    _, _, workspace = layout
-    return workspace / "AKDB" / "export"
 
 
 def load_project_registry(path: Path) -> dict[str, Any]:

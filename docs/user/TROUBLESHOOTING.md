@@ -56,9 +56,10 @@ Check:
 
 ## Database Is Locked Or Copy Fails
 
-SQLite allows one writer. Stop `akdb serve` and close MCP clients before replacing or rewriting the live database. If a client keeps the DB open, restart the client after the DB refresh.
-
-The repo-local helper `scripts\refresh_akdb_db.bat` has a read-only status mode and an explicit `apply` mode for swapping the live DB with a backup.
+SQLite allows one writer. Use the AKDB CLI, API, or MCP authoring operations against the live
+database; do not replace the whole database from a generated import snapshot. Stop `akdb serve` and
+close MCP clients only when taking or restoring an operator-controlled backup, then restart clients
+so they reopen the database.
 
 ## MCP Tools Do Not Appear
 

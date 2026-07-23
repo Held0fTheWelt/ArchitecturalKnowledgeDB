@@ -1,52 +1,23 @@
-@startuml architecturalknowledgedb-main-activity
+@startuml akdb-main-activity
 title ArchitecturalKnowledgeDB - Main Activity
-
 start
-:Configure AKDB_DATABASE_PATH and optional source root;
-:Register or select project;
-
-if (Source corpus imported?) then (no)
-  :Import ADRs, documents, rules, definitions, UML;
-  :Update SQLite knowledge items and FTS;
-else (yes)
+:Select project and backend;
+if (DB-native architecture change?) then (yes)
+  :Create/update SAD sections, decisions and UML
+through CLI, API or MCP;
+  :Persist canonical akdb:// records;
+  :Validate completeness and traceability;
+  :Export deterministic docs/architecture projection;
+else (external evidence)
+  :Register repository or import documents;
+  :Scan/read source without repository mutation;
 endif
-
-if (Repository provenance needed?) then (yes)
-  :Register repository path;
-  :Scan Git metadata read-only;
-  :Store selected commits and changed files;
+:Search, recall, reason or build context pack;
+if (Drift detected?) then (yes)
+  :Report source-anchored finding;
 endif
-
-:Run search, context pack, consistency, or staleness command;
-
-if (Optional vector backend configured?) then (yes)
-  :Embed changed items or run hybrid recall;
-else (no)
-  :Use FTS recall baseline;
+if (Downstream consumer needs projection?) then (yes)
+  :Consume exported SAD/UML files;
 endif
-
-if (MCP bulk/list/search call?) then (yes)
-  :Return compact response by default;
-  if (detail=full requested?) then (yes)
-    :Include complete source/prose fields;
-  else (no)
-  endif
-else (no)
-endif
-
-:Return source-anchored context, recall neighborhood, or findings;
-
-if (Sources changed?) then (yes)
-  :Reingest from owning folders;
-else (no)
-endif
-
-if (Public website projection changed?) then (yes)
-  :Update product-facts and curated website deep dive;
-  :Refresh deploy snapshot and Atlas/product tests;
-else (no)
-endif
-
 stop
-
 @enduml

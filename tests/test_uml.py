@@ -2,9 +2,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from architectural_knowledge_db.models import KnowledgeLinkInput, UMLElementInput, UMLRelationshipInput
+import pytest
+
+from architectural_knowledge_db.models import (
+    ContextPackRequest,
+    KnowledgeLinkInput,
+    UMLDiagramInput,
+    UMLDiagramUpdate,
+    UMLElementInput,
+    UMLRelationshipInput,
+    UMLRelationshipUpdate,
+)
 from architectural_knowledge_db.services.context import ContextPackBuilder
-from architectural_knowledge_db.models import ContextPackRequest
 from architectural_knowledge_db.services.knowledge import KnowledgeService
 from architectural_knowledge_db.services.uml import UMLService
 from tests.conftest import add_project
@@ -154,3 +163,86 @@ def test_uml_import_skips_templates_and_includes(conn, tmp_path: Path) -> None:
 
     assert result["imported"] == 1
     assert result["skipped"] == ["_includes/shared.puml", "_templates/template.puml"]
+
+
+def test_uml_full_db_native_crud(conn, tmp_path: Path) -> None:
+    add_project(conn, "akdb")
+    from architectural_knowledge_db.models import SadDocumentInput
+    from architectural_knowledge_db.services.sad import SadService
+
+    SadService(conn).upsert_document(
+        "akdb",
+        SadDocumentInput(document_id="root", title="Root architecture"),
+    )
+    service = UMLService(conn)
+    diagram = service.create_diagram(
+        "akdb",
+        UMLDiagramInput(
+            diagram_id="db-native",
+            title="DB Native",
+            diagram_kind="component",
+            model={"source_key": "UML/components/db-native.puml", "sad_document_id": "root"},
+        ),
+    )
+    assert diagram["source_uri"] == "akdb://akdb/uml/db-native"
+
+    a = service.add_element(
+        "akdb", UMLElementInput(diagram_id="db-native", element_id="db-native:a", element_type="component", name="A")
+    )
+    b = service.add_element(
+        "akdb", UMLElementInput(diagram_id="db-native", element_id="db-native:b", element_type="component", name="B")
+    )
+    relationship = service.add_relationship(
+        "akdb",
+        UMLRelationshipInput(
+            diagram_id="db-native",
+            source_element_id=a["element_id"],
+            target_element_id=b["element_id"],
+            label="calls",
+        ),
+    )
+    service.update_relationship(
+        "akdb",
+        relationship["relationship_uid"],
+        UMLRelationshipUpdate(relationship_type="dependency", label="uses"),
+    )
+    service.update_diagram(
+        "akdb",
+        "db-native",
+        UMLDiagramUpdate(title="DB Native Components", diagram_kind="c4-component"),
+    )
+    exported = service.export_diagrams("akdb", tmp_path / "out")
+    text = Path(exported["files"][0]).read_text(encoding="utf-8")
+    assert "a ..> b : uses" in text
+
+    service.delete_relationship("akdb", relationship["relationship_uid"])
+    service.delete_element("akdb", b["element_id"])
+    assert service.get_diagram("akdb", "db-native")["relationships"] == []
+    assert service.delete_diagram("akdb", "db-native")["deleted"] is True
+
+
+def test_db_native_uml_rejects_unsafe_or_orphaned_export_paths(conn) -> None:
+    add_project(conn, "akdb")
+    service = UMLService(conn)
+
+    with pytest.raises(ValueError, match="inside the export root"):
+        service.create_diagram(
+            "akdb",
+            UMLDiagramInput(
+                diagram_id="unsafe",
+                title="Unsafe",
+                model={"source_key": "../unsafe.puml"},
+            ),
+        )
+    with pytest.raises(ValueError, match="Unknown SAD document"):
+        service.create_diagram(
+            "akdb",
+            UMLDiagramInput(
+                diagram_id="orphan",
+                title="Orphan",
+                model={
+                    "source_key": "UML/orphan.puml",
+                    "sad_document_id": "missing",
+                },
+            ),
+        )

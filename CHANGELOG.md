@@ -4,6 +4,26 @@ All notable changes to this project are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- DB-native SAD CRUD for documents, frontmatter, preambles, ordered sections, and decisions through
+  shared service, CLI, FastAPI, and MCP surfaces.
+- DB-native UML diagram, element, and relationship CRUD with SAD association, safe export paths,
+  and `akdb://` provenance.
+- Hierarchical multi-SAD export: each document and associated UML package is rendered from its
+  DB-owned `source_key`.
+- Expanded AKDB self-architecture with a root SAD, agent-authoring subsystem SAD, and 31 UML
+  diagrams covering context, services, data, persistence, runtime, deployment, lifecycles, and
+  traceability.
+
+### Changed
+
+- AKDB's own SAD/UML is maintained only in the `architectural-knowledge-db` database project;
+  `docs/architecture` is its deterministic, versioned projection.
+- Self-repository provenance is registered read-only for code/architecture drift checks.
+
 ## [0.3.0] - 2026-07-23
 
 Arc42 self-documentation release: AKDB can export a deterministic `architecture.md` + `UML/`
@@ -94,8 +114,8 @@ workspace ADR-TTD-0006. Operations: [docs/operations/postgres.md](docs/operation
   open short-lived connections via `connect()`.
 - **Import/export backup discovery** (`services/import_export.py`): the SQLite-only
   `PRAGMA database_list` path is skipped on PostgreSQL; explicit export-root env vars
-  remain honored. File-swap / `scripts/refresh_akdb_db.bat`-style refresh helpers stay
-  SQLite-only — use `pg_dump` / `pg_restore` for Postgres (see ops guide).
+  remain honored. Whole-database file-swap refresh was retired because it can overwrite
+  DB-native SAD/UML authority; use AKDB authoring operations and deterministic exports instead.
 - **Package metadata**: version `0.2.0`; optional `[postgres]` extra; package data includes
   `db/schema/pg/*.sql`. Local API default bind remains `127.0.0.1:8787`
   (`AKDB_HOST` / `AKDB_PORT`); container images bind `0.0.0.0:8787`.

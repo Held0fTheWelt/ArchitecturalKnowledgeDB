@@ -8,4 +8,5 @@ This folder contains practical operating notes for AKDB.
 | [postgres.md](postgres.md) | Opt-in PostgreSQL backend: DSN, compose, backups, v1 limits. |
 | [RUNBOOK.md](RUNBOOK.md) | Maintain a local AKDB service and database. |
 
-Repo-local scripts live in `scripts/`. Public Tiny Tools showcase/user scripts live outside AKDB under `D:\TinyToolDevelopment\Git\Tools`.
+Repo-local scripts live in `scripts/`. Tiny Tool Observatory and other tools keep their operational
+scripts in their own repositories.

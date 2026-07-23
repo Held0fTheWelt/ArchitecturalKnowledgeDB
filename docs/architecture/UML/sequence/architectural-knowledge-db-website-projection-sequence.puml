@@ -1,27 +1,21 @@
-@startuml architecturalknowledgedb-website-projection-sequence
-title ArchitecturalKnowledgeDB - Website And Atlas Projection Sequence
-
+@startuml akdb-observatory-sequence
+title AKDB - Tiny Tool Observatory and Consumer Projection
 actor Maintainer
-participant "AKDB SAD\n+ product-facts.yml" as Facts
-participant "Website facts_loader\n+ product catalog" as Catalog
-participant "Tool page\n+ deep dive content" as DeepDive
-participant "Atlas data join" as Atlas
-participant "Static build / deploy snapshot" as Build
-actor "Website reader" as Reader
-
-Maintainer -> Facts : update AKDB boundary, usage, integrations
-Facts -> Catalog : fact overlay supplies category/status/summary/detail
-Catalog -> Build : literal Outer Tool entry + snapshot fallback
-Maintainer -> DeepDive : curate usage, working modes, benefits, integrations
-DeepDive -> Build : render AKDB feature page
-Facts -> Atlas : product identity + category join
-Atlas -> Build : emit AKDB node and relationships
-Build -> Reader : Outer Tools list, AKDB page, Atlas node
-
-note over Facts,Build
-  Website content can feature AKDB strongly,
-  but source files and SAD/UML remain authoritative.
-  The deploy snapshot exists because Cloudflare may not see the sibling Git repo.
+participant "AKDB authoring surfaces" as Surface
+database "AKDB database" as DB
+participant "SAD/UML exporter" as Exporter
+participant "Versioned architecture projection" as Projection
+participant "Tiny Tool Observatory" as Observatory
+participant "Other framework tools" as Consumers
+Maintainer -> Surface : maintain architecture in AKDB
+Surface -> DB : persist canonical records
+Maintainer -> Exporter : export project architecture
+Exporter -> DB : read all associated SAD/UML
+Exporter -> Projection : deterministic files
+Projection -> Observatory : architecture/product ingestion
+Projection -> Consumers : stable integration artifact
+note over DB,Projection
+The database is authoring authority for DB-native SAD/UML.
+Projection files are reviewable and distributable snapshots.
 end note
-
 @enduml

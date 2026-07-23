@@ -1,0 +1,25 @@
+@startuml spec-validate-sequence
+title AKDB Agent-Authoring - Spec Validation & Ready Gate (set_spec_status)
+actor "AI agent" as A
+participant "Authoring.set_spec_status" as S
+participant "Completeness.spec_validate" as V
+participant "archetype_requirements.yml" as Y
+participant "knowledge_links" as L
+participant "source_areas / repo" as SRC
+participant "consistency_findings" as C
+A -> S : set_spec_status(spec, "ready")
+S -> V : spec_validate(spec)
+V -> Y : required_diagrams + file_map + blocking (by archetype)
+V -> L : spec_realizes_uml links
+V -> L : element_maps_to_file links
+V -> SRC : resolve each file-map target_ref
+V -> V : compute missing_required_diagrams / unresolved_file_map /\nuncovered_elements / dangling_refs
+V -> C : write findings
+V --> S : {blocking:[...], warnings:[...]}
+alt any blocking category non-empty
+  S --> A : refused; lifecycle stays draft + findings
+else all blocking empty
+  S -> S : lifecycle draft -> ready
+  S --> A : ready (complete: diagrams + file-map resolve)
+end
+@enduml

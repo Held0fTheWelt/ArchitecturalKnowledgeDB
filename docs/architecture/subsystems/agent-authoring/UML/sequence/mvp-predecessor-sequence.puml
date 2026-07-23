@@ -1,0 +1,19 @@
+@startuml mvp-predecessor-sequence
+title AKDB Agent-Authoring - MVP Creation & Predecessor Suggestion (create_mvp)
+actor "AI agent" as A
+participant "Authoring.create_mvp" as M
+participant "mvps" as T
+participant "knowledge_links" as L
+A -> M : create_mvp(title, intent, topic_id)
+M -> T : seq = max(seq)+1 ; insert mvp (lifecycle=planned)
+M -> L : insert mvp_touches_topic(mvp -> topic)
+M -> L : latest mvp on topic by seq (excluding self)
+alt topic already has prior MVP
+  L --> M : predecessor mvp
+  M --> A : suggest edge: mvp_extends|mvp_revises(predecessor)?
+  A -> M : confirm edge type
+  M -> L : insert chosen mvp_* edge(new -> predecessor)
+else first MVP on topic
+  M --> A : created (no predecessor; topicless flagged if no topic)
+end
+@enduml

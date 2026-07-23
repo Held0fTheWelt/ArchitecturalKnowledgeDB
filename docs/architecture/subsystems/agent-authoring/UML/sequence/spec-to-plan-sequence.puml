@@ -1,0 +1,21 @@
+@startuml spec-to-plan-sequence
+title AKDB Agent-Authoring - Spec to Plan (akdb_spec_to_plan, D8)
+actor "AI agent" as A
+participant "Authoring.spec_to_plan" as P
+participant "Completeness.spec_validate" as V
+participant "knowledge_links" as L
+participant "uml (sequences)" as U
+A -> P : spec_to_plan(spec)
+P -> V : spec_validate(spec)
+alt spec not ready (blocking findings)
+  V --> P : blocking[]
+  P --> A : refuse; "make spec ready first" + findings
+else ready
+  V --> P : ok
+  P -> L : element_maps_to_file targets (file-map)
+  P -> U : realized sequence diagrams (order hints)
+  P -> P : order tasks by sequence; one TDD task per file-map target;\nrequired diagrams -> verification checkpoints
+  P --> A : draft plan (write test -> implement -> run -> commit, per target)
+  note over P : draft for review; never auto-executed (loop to writing-plans)
+end
+@enduml

@@ -74,3 +74,45 @@ def test_api_uml_and_consistency_endpoints(tmp_path: Path, monkeypatch) -> None:
     response = client.post("/projects/akdb/consistency/check", json={})
     assert response.status_code == 200
     assert isinstance(response.json(), list)
+
+
+def test_api_db_native_sad_and_uml_crud(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("AKDB_DATABASE_PATH", str(tmp_path / "api-authoring.sqlite"))
+    client = TestClient(create_app())
+    assert client.post("/projects", json={"project_id": "p", "display_name": "P"}).status_code == 200
+
+    response = client.put(
+        "/projects/p/sads/root",
+        json={
+            "document_id": "root",
+            "title": "Root",
+            "source_key": "architecture.md",
+            "preamble_md": "# Root",
+        },
+    )
+    assert response.status_code == 200
+    response = client.put(
+        "/projects/p/sads/root/sections/intro",
+        json={
+            "document_id": "root",
+            "section_id": "intro",
+            "title": "1. Introduction",
+            "order": 0,
+            "body_md": "API-authored.",
+        },
+    )
+    assert response.status_code == 200
+    assert client.get("/projects/p/sads/root").json()["source_uri"] == "akdb://p/sad/root"
+
+    response = client.post(
+        "/projects/p/uml/diagrams",
+        json={
+            "diagram_id": "components",
+            "title": "Components",
+            "diagram_kind": "c4-component",
+            "model": {"source_key": "UML/components.puml", "sad_document_id": "root"},
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["source_uri"] == "akdb://p/uml/components"
+    assert client.delete("/projects/p/uml/diagrams/components").status_code == 200

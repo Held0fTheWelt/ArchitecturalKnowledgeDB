@@ -28,7 +28,7 @@ See [INTERNAL_DOCS_RELOCATED.md](INTERNAL_DOCS_RELOCATED.md).
 | --- | --- |
 | `user/` | Practical user documentation: quick start, manual, settings, troubleshooting, FAQ, third-party notes. |
 | `operations/` | MCP setup, PostgreSQL opt-in ops, and public operations notes. |
-| `architecture/` | Generated arc42 self-mirror (`architecture.md` + `UML/`) plus supporting notes (e.g. dual-backend). Do not hand-edit the mirror; re-export from the database. |
+| `architecture/` | Generated root/subsystem arc42 projection and associated UML, plus supporting notes (e.g. dual-backend). Author in AKDB; do not hand-edit the projection. |
 | `adr/` | Public decisions governing AKDB itself. |
 | `examples/` | Registry, compose, and standalone sample inputs. |
 
@@ -36,4 +36,5 @@ See [INTERNAL_DOCS_RELOCATED.md](INTERNAL_DOCS_RELOCATED.md).
 
 AKDB may index other repositories at runtime, but this `docs/` tree only documents public-safe AKDB usage. Generated exports and imported project corpora belong in ignored runtime folders or outside the repository.
 
-In the Tiny Tool workspace, internal maintainer tools and cross-project architecture authority live in `D:\TinyToolDevelopment\Git`, not in this public extra-tools repository.
+Tiny Tool Observatory and other framework tools may consume AKDB through API/MCP or the generated
+projection, but their architecture and data stay in their own repositories.

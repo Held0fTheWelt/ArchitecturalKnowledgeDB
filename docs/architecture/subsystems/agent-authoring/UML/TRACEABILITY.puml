@@ -1,0 +1,20 @@
+@startuml agent-authoring-traceability
+title AKDB Agent-Authoring - Decision Traceability
+note as Coverage
+|= Decision / capability |= Primary UML evidence |
+| D1 DB-native authoring | classes/akdb-agent-authoring-data-model.puml; components/c4-container.puml; components/c4-component.puml |
+| D2 Completeness and file map | sequence/spec-validate-sequence.puml; flow/completeness-validation-activity.puml; states/spec-lifecycle-states.puml |
+| D3 Curated, deduplicated topics | sequence/mvp-predecessor-sequence.puml; classes/akdb-agent-authoring-data-model.puml |
+| D4 Extend knowledge-item spine | classes/akdb-agent-authoring-data-model.puml |
+| D5 Links-first promotion | classes/akdb-agent-authoring-data-model.puml |
+| D6 Cognition over dumps | sequence/recall-sequence.puml; components/c4-component.puml |
+| D7 Graph reasoning and questions | states/question-lifecycle-states.puml; sequence/composite-cognition-sequence.puml |
+| D8 Authoring leverage | sequence/spec-to-plan-sequence.puml |
+| D9 Adaptive memory and grounding | flow/adaptive-ranking-activity.puml; classes/akdb-agent-authoring-data-model.puml |
+| D10 Semantic, temporal, working-set recall | sequence/semantic-recall-sequence.puml; components/c4-component.puml |
+| D11 Composite cognition and cross-space recall | sequence/composite-cognition-sequence.puml |
+| Roadmap lifecycle | sequence/mvp-predecessor-sequence.puml; states/mvp-lifecycle-states.puml |
+| Survey and authoring context | use-cases/akdb-agent-authoring-use-cases.puml; components/c4-component.puml |
+| System boundary | components/c4-context.puml |
+end note
+@enduml

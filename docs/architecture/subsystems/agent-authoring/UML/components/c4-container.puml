@@ -1,0 +1,35 @@
+@startuml agent-authoring-containers
+title AKDB Agent-Authoring - Container View
+package "ArchitecturalKnowledgeDB" {
+ component "CLI / API / MCP" as Surface
+ component "Cognition + memory" as Cognition
+ component "Authoring + completeness" as Authoring
+ component "Roadmap + survey" as Roadmap
+ component "Reasoning + review + guardrails" as Reasoning
+ component "SAD/UML architecture authoring" as Architecture
+ component "RecallBackend" as Recall
+ component "KnowledgeService" as Spine
+ component "Database facade" as Facade
+ database "SQLite or PostgreSQL" as DB
+}
+folder "Registered repositories" as Repos
+rectangle "Optional embedding endpoint" as Vector
+folder "Deterministic exports" as Export
+Surface --> Cognition
+Surface --> Authoring
+Surface --> Roadmap
+Surface --> Reasoning
+Surface --> Architecture
+Cognition --> Recall
+Recall --> Vector : optional
+Cognition --> Spine
+Authoring --> Spine
+Roadmap --> Spine
+Reasoning --> Spine
+Architecture --> Spine
+Spine --> Facade
+Architecture --> Facade : UML models
+Facade --> DB
+Authoring --> Repos : validate file mappings read-only
+Architecture --> Export
+@enduml

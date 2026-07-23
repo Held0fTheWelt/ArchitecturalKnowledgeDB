@@ -1,0 +1,11 @@
+@startuml question-lifecycle-states
+title AKDB Agent-Authoring - Question Lifecycle States (D7)
+[*] --> open
+open : open question / pending decision; linked question_about_topic
+open --> answered : resolve_question(by=adr|spec) [adds question_resolved_by]
+open --> wontfix : closed without an answer
+answered --> open : reopened (answer superseded)
+answered : resolver linked; surfaces as resolved in brief/recall
+wontfix --> [*]
+answered --> [*]
+@enduml

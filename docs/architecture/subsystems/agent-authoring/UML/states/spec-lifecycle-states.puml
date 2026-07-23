@@ -1,0 +1,15 @@
+@startuml spec-lifecycle-states
+title AKDB Agent-Authoring - Spec Lifecycle States
+[*] --> draft
+draft : author sections; attach UML (spec_realizes_uml)
+draft : map elements -> files (element_maps_to_file)
+draft --> draft : edit / add diagram / map file
+draft --> ready : set_spec_status(ready) [spec_validate blocking == empty]
+ready --> draft : validate regresses (missing diagram / unresolved file-map)
+ready : architecture complete; every core element pinned to a real file
+ready --> implemented : code landed for the file-map targets
+implemented --> superseded : a later spec supersedes this one
+ready --> superseded : superseded before implementation
+draft --> superseded : abandoned
+superseded --> [*]
+@enduml

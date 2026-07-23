@@ -10,9 +10,15 @@ from architectural_knowledge_db.models import (
     OriginExplainRequest,
     RecallRequest,
     RememberRequest,
+    SadDecisionInput,
+    SadDocumentInput,
+    SadSectionInput,
+    UMLDiagramInput,
+    UMLDiagramUpdate,
     UMLElementInput,
     UMLElementUpdate,
     UMLRelationshipInput,
+    UMLRelationshipUpdate,
 )
 from architectural_knowledge_db.services.authoring import AuthoringService
 from architectural_knowledge_db.services.cognition import CognitionService
@@ -30,6 +36,7 @@ from architectural_knowledge_db.services.recall_backend import LLMStoreEmbedding
 from architectural_knowledge_db.services.reingest import ReingestService
 from architectural_knowledge_db.services.review import ReviewService
 from architectural_knowledge_db.services.roadmap import RoadmapService
+from architectural_knowledge_db.services.sad import SadService
 from architectural_knowledge_db.services.survey import SurveyService
 from architectural_knowledge_db.services.search import SearchService
 from architectural_knowledge_db.services.staleness import StalenessService
@@ -47,6 +54,7 @@ _COMPACT_TOOLS = {
     "architectural_knowledge_db_find_status_quo_drifts",
     "architectural_knowledge_db_run_drift_check",
     "akdb_list_adrs",
+    "akdb_list_sads",
     "akdb_list_diagrams",
     "akdb_recall",
     "akdb_explore",
@@ -302,6 +310,119 @@ MCP_MANIFEST: dict[str, Any] = {
             },
         },
         {
+            "name": "akdb_list_sads",
+            "description": "List DB-native SAD documents for a project.",
+            "input_schema": {
+                "type": "object",
+                "required": ["project_id"],
+                "properties": {"project_id": {"type": "string"}},
+            },
+        },
+        {
+            "name": "akdb_get_sad",
+            "description": "Read one DB-native SAD with preamble, sections, and decisions.",
+            "input_schema": {
+                "type": "object",
+                "required": ["project_id", "document_id"],
+                "properties": {
+                    "project_id": {"type": "string"},
+                    "document_id": {"type": "string"},
+                },
+            },
+        },
+        {
+            "name": "akdb_upsert_sad",
+            "description": "Create or update a DB-native SAD document.",
+            "input_schema": {
+                "type": "object",
+                "required": ["project_id", "document_id", "title"],
+                "properties": {
+                    "project_id": {"type": "string"},
+                    "document_id": {"type": "string"},
+                    "title": {"type": "string"},
+                    "source_key": {"type": "string"},
+                    "preamble_md": {"type": "string"},
+                    "frontmatter": {"type": "object"},
+                    "status": {"type": "string"},
+                    "summary": {"type": "string"},
+                },
+            },
+        },
+        {
+            "name": "akdb_upsert_sad_section",
+            "description": "Create, update, or reorder an arc42 section in AKDB.",
+            "input_schema": {
+                "type": "object",
+                "required": ["project_id", "document_id", "section_id", "title", "order"],
+                "properties": {
+                    "project_id": {"type": "string"},
+                    "document_id": {"type": "string"},
+                    "section_id": {"type": "string"},
+                    "title": {"type": "string"},
+                    "order": {"type": "integer"},
+                    "body_md": {"type": "string"},
+                    "level": {"type": "integer"},
+                    "role": {"type": "string"},
+                },
+            },
+        },
+        {
+            "name": "akdb_delete_sad_section",
+            "description": "Delete one SAD section from AKDB.",
+            "input_schema": {
+                "type": "object",
+                "required": ["project_id", "document_id", "section_id"],
+                "properties": {
+                    "project_id": {"type": "string"},
+                    "document_id": {"type": "string"},
+                    "section_id": {"type": "string"},
+                },
+            },
+        },
+        {
+            "name": "akdb_upsert_sad_decision",
+            "description": "Create, update, or reorder a SAD decision in AKDB.",
+            "input_schema": {
+                "type": "object",
+                "required": ["project_id", "document_id", "decision_id", "title", "order"],
+                "properties": {
+                    "project_id": {"type": "string"},
+                    "document_id": {"type": "string"},
+                    "decision_id": {"type": "string"},
+                    "title": {"type": "string"},
+                    "order": {"type": "integer"},
+                    "status": {"type": "string"},
+                    "body_md": {"type": "string"},
+                    "summary": {"type": "string"},
+                },
+            },
+        },
+        {
+            "name": "akdb_delete_sad_decision",
+            "description": "Delete one SAD decision from AKDB.",
+            "input_schema": {
+                "type": "object",
+                "required": ["project_id", "document_id", "decision_id"],
+                "properties": {
+                    "project_id": {"type": "string"},
+                    "document_id": {"type": "string"},
+                    "decision_id": {"type": "string"},
+                },
+            },
+        },
+        {
+            "name": "akdb_delete_sad",
+            "description": "Delete a SAD document and its structured children from AKDB.",
+            "input_schema": {
+                "type": "object",
+                "required": ["project_id", "document_id"],
+                "properties": {
+                    "project_id": {"type": "string"},
+                    "document_id": {"type": "string"},
+                },
+            },
+        },
+        {
             "name": "akdb_export_sad",
             "description": "Export a project's arc42 architecture.md + UML from the database.",
             "input_schema": {
@@ -311,6 +432,48 @@ MCP_MANIFEST: dict[str, Any] = {
                     "project_id": {"type": "string"},
                     "folder": {"type": "string"},
                     "document_local_id": {"type": "string"},
+                },
+            },
+        },
+        {
+            "name": "akdb_create_uml_diagram",
+            "description": "Create a DB-native UML diagram.",
+            "input_schema": {
+                "type": "object",
+                "required": ["project_id", "diagram_id", "title"],
+                "properties": {
+                    "project_id": {"type": "string"},
+                    "diagram_id": {"type": "string"},
+                    "title": {"type": "string"},
+                    "notation": {"type": "string"},
+                    "diagram_kind": {"type": "string"},
+                    "model": {"type": "object"},
+                    "raw_source": {"type": "string"},
+                },
+            },
+        },
+        {
+            "name": "akdb_update_uml_diagram",
+            "description": "Update diagram metadata or PlantUML/Mermaid source in AKDB.",
+            "input_schema": {
+                "type": "object",
+                "required": ["project_id", "diagram_id", "changes"],
+                "properties": {
+                    "project_id": {"type": "string"},
+                    "diagram_id": {"type": "string"},
+                    "changes": {"type": "object"},
+                },
+            },
+        },
+        {
+            "name": "akdb_delete_uml_diagram",
+            "description": "Delete a diagram and its structured children from AKDB.",
+            "input_schema": {
+                "type": "object",
+                "required": ["project_id", "diagram_id"],
+                "properties": {
+                    "project_id": {"type": "string"},
+                    "diagram_id": {"type": "string"},
                 },
             },
         },
@@ -385,6 +548,18 @@ MCP_MANIFEST: dict[str, Any] = {
             },
         },
         {
+            "name": "akdb_delete_uml_element",
+            "description": "Delete a UML element and attached relationships.",
+            "input_schema": {
+                "type": "object",
+                "required": ["project_id", "element_id"],
+                "properties": {
+                    "project_id": {"type": "string"},
+                    "element_id": {"type": "string"},
+                },
+            },
+        },
+        {
             "name": "akdb_add_uml_relationship",
             "description": "Add a relationship between UML elements.",
             "input_schema": {
@@ -398,6 +573,31 @@ MCP_MANIFEST: dict[str, Any] = {
                     "relationship_type": {"type": "string"},
                     "label": {"type": "string"},
                     "metadata": {"type": "object"},
+                },
+            },
+        },
+        {
+            "name": "akdb_update_uml_relationship",
+            "description": "Update a UML relationship.",
+            "input_schema": {
+                "type": "object",
+                "required": ["project_id", "relationship_uid", "changes"],
+                "properties": {
+                    "project_id": {"type": "string"},
+                    "relationship_uid": {"type": "string"},
+                    "changes": {"type": "object"},
+                },
+            },
+        },
+        {
+            "name": "akdb_delete_uml_relationship",
+            "description": "Delete a UML relationship.",
+            "input_schema": {
+                "type": "object",
+                "required": ["project_id", "relationship_uid"],
+                "properties": {
+                    "project_id": {"type": "string"},
+                    "relationship_uid": {"type": "string"},
                 },
             },
         },
@@ -977,6 +1177,34 @@ class McpDispatcher:
             return ImportExportService(self.conn).import_adrs(arguments["project_id"], arguments["folder"])
         if tool_name == "akdb_export_adrs":
             return ImportExportService(self.conn).export_adrs(arguments["project_id"], arguments["folder"])
+        if tool_name == "akdb_list_sads":
+            return SadService(self.conn).list_documents(arguments["project_id"])
+        if tool_name == "akdb_get_sad":
+            return SadService(self.conn).get_document(arguments["project_id"], arguments["document_id"])
+        if tool_name == "akdb_upsert_sad":
+            project_id = arguments["project_id"]
+            payload = {key: value for key, value in arguments.items() if key != "project_id"}
+            return SadService(self.conn).upsert_document(project_id, SadDocumentInput(**payload))
+        if tool_name == "akdb_upsert_sad_section":
+            project_id = arguments["project_id"]
+            payload = {key: value for key, value in arguments.items() if key != "project_id"}
+            return SadService(self.conn).upsert_section(project_id, SadSectionInput(**payload))
+        if tool_name == "akdb_delete_sad_section":
+            return SadService(self.conn).delete_section(
+                arguments["project_id"], arguments["document_id"], arguments["section_id"]
+            )
+        if tool_name == "akdb_upsert_sad_decision":
+            project_id = arguments["project_id"]
+            payload = {key: value for key, value in arguments.items() if key != "project_id"}
+            return SadService(self.conn).upsert_decision(project_id, SadDecisionInput(**payload))
+        if tool_name == "akdb_delete_sad_decision":
+            return SadService(self.conn).delete_decision(
+                arguments["project_id"], arguments["document_id"], arguments["decision_id"]
+            )
+        if tool_name == "akdb_delete_sad":
+            return SadService(self.conn).delete_document(
+                arguments["project_id"], arguments["document_id"]
+            )
         if tool_name == "akdb_export_sad":
             return ImportExportService(self.conn).export_sad(
                 arguments["project_id"],
@@ -988,6 +1216,20 @@ class McpDispatcher:
                 arguments["project_id"],
                 kind=arguments.get("kind"),
                 limit=arguments.get("limit", 100),
+            )
+        if tool_name == "akdb_create_uml_diagram":
+            project_id = arguments["project_id"]
+            payload = {key: value for key, value in arguments.items() if key != "project_id"}
+            return UMLService(self.conn).create_diagram(project_id, UMLDiagramInput(**payload))
+        if tool_name == "akdb_update_uml_diagram":
+            return UMLService(self.conn).update_diagram(
+                arguments["project_id"],
+                arguments["diagram_id"],
+                UMLDiagramUpdate(**arguments.get("changes", {})),
+            )
+        if tool_name == "akdb_delete_uml_diagram":
+            return UMLService(self.conn).delete_diagram(
+                arguments["project_id"], arguments["diagram_id"]
             )
         if tool_name == "akdb_import_uml":
             return UMLService(self.conn).import_diagrams(arguments["project_id"], arguments["folder"])
@@ -1005,9 +1247,23 @@ class McpDispatcher:
                 arguments["element_id"],
                 UMLElementUpdate(**arguments.get("changes", {})),
             )
+        if tool_name == "akdb_delete_uml_element":
+            return UMLService(self.conn).delete_element(
+                arguments["project_id"], arguments["element_id"]
+            )
         if tool_name == "akdb_add_uml_relationship":
             project_id = arguments.pop("project_id")
             return UMLService(self.conn).add_relationship(project_id, UMLRelationshipInput(**arguments))
+        if tool_name == "akdb_update_uml_relationship":
+            return UMLService(self.conn).update_relationship(
+                arguments["project_id"],
+                arguments["relationship_uid"],
+                UMLRelationshipUpdate(**arguments.get("changes", {})),
+            )
+        if tool_name == "akdb_delete_uml_relationship":
+            return UMLService(self.conn).delete_relationship(
+                arguments["project_id"], arguments["relationship_uid"]
+            )
         if tool_name == "akdb_check_consistency":
             return ConsistencyService(self.conn).check(
                 arguments["project_id"],

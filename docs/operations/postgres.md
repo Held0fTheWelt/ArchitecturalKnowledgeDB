@@ -43,8 +43,8 @@ The override adds a `postgres:16` service, sets `AKDB_DB_URL` on the AKDB servic
 
 **SQLite-only patterns (do not use with PostgreSQL):**
 
-- Stop the service and swap the `.sqlite` file
-- `scripts/refresh_akdb_db.bat` and similar file-copy refresh helpers
+- Stop the service and replace the complete database from an import snapshot
+- Retired file-copy refresh helpers; DB-native SAD/UML must be changed through AKDB operations
 
 Those assume a single SQLite file on disk and are not valid for a Postgres DSN.
 

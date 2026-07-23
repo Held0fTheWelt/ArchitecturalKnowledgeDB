@@ -94,6 +94,36 @@ class AdrInput(BaseModel):
     sections: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class SadDocumentInput(BaseModel):
+    document_id: str
+    title: str
+    source_key: str = "architecture.md"
+    preamble_md: str | None = None
+    frontmatter: dict[str, Any] = Field(default_factory=dict)
+    status: str = "current"
+    summary: str | None = None
+
+
+class SadSectionInput(BaseModel):
+    document_id: str
+    section_id: str
+    title: str
+    order: int
+    body_md: str = ""
+    level: int = Field(default=2, ge=2, le=6)
+    role: str | None = None
+
+
+class SadDecisionInput(BaseModel):
+    document_id: str
+    decision_id: str
+    title: str
+    order: int
+    status: str = "proposed"
+    body_md: str = ""
+    summary: str | None = None
+
+
 class RuleInput(BaseModel):
     rule_id: str
     title: str | None = None
@@ -142,9 +172,18 @@ class UMLDiagramInput(BaseModel):
     diagram_id: str
     title: str
     notation: Literal["plantuml", "mermaid", "drawio", "internal"] = "plantuml"
-    diagram_kind: Literal["class", "activity", "object", "sequence", "state", "usecase", "unknown"] = "unknown"
+    diagram_kind: str = "unknown"
     source_uri: str | None = None
     model: dict[str, Any] = Field(default_factory=dict)
+    raw_source: str | None = None
+
+
+class UMLDiagramUpdate(BaseModel):
+    title: str | None = None
+    notation: Literal["plantuml", "mermaid", "drawio", "internal"] | None = None
+    diagram_kind: str | None = None
+    source_key: str | None = None
+    sad_document_id: str | None = None
     raw_source: str | None = None
 
 
@@ -171,6 +210,12 @@ class UMLRelationshipInput(BaseModel):
     relationship_type: str = "association"
     label: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class UMLRelationshipUpdate(BaseModel):
+    relationship_type: str | None = None
+    label: str | None = None
+    metadata: dict[str, Any] | None = None
 
 
 class ConsistencyCheckRequest(BaseModel):

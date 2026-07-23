@@ -1,38 +1,26 @@
-@startuml architecturalknowledgedb-primary-sequence
-title ArchitecturalKnowledgeDB - Reingest And Context Pack Sequence
-
+@startuml akdb-primary-sequence
+title ArchitecturalKnowledgeDB - Authoring and Recall
 actor Maintainer
 actor Agent
-participant "AKDB CLI / MCP" as Client
-participant "ProjectService" as Projects
-participant "ImportExportService" as Importer
-participant "Repository/Git scanner" as Git
-participant "ContextService" as Context
-database "SQLite + FTS" as DB
-participant "Normative source folders" as Sources <<folder>>
-participant "Registered repository" as Repo <<folder>>
-
-Maintainer -> Client : import registry / setup project
-Client -> Projects : upsert project + source roots
-Projects -> DB : persist project metadata
-
-Maintainer -> Client : reingest project
-Client -> Importer : import ADRs, docs, UML
-Importer -> Sources : read files
-Importer -> DB : upsert knowledge items + FTS
-Client -> Git : scan registered repos
-Git -> Repo : read git metadata
-Git -> DB : store selected provenance
-
-Agent -> Client : get context pack(project, task, paths)
-Client -> Context : build_context_pack(...)
-Context -> DB : search, rank, load links/provenance
-Context --> Client : authority-aware context pack
-Client --> Agent : relevant sources + drift/provenance
-
-note over Importer,Sources
-  Reingest reads source files and rebuilds derived records.
-  It does not write back to Git/docs or Git/UML.
-end note
-
+participant "CLI / API / MCP" as Surface
+participant SadService
+participant UMLService
+participant ContextService
+participant ImportExportService as Exporter
+database "Database facade" as DB
+participant "docs/architecture projection" as Files
+Maintainer -> Surface : upsert SAD document/section/decision
+Surface -> SadService : validated authoring request
+SadService -> DB : canonical akdb:// knowledge items
+Maintainer -> Surface : create/update UML
+Surface -> UMLService : validated diagram model/source
+UMLService -> DB : canonical diagram + graph
+Maintainer -> Surface : export SAD
+Surface -> Exporter : export project documents
+Exporter -> DB : read SAD/UML aggregate
+Exporter -> Files : write deterministic projection
+Agent -> Surface : search/context/recall
+Surface -> ContextService : authority-aware query
+ContextService -> DB : FTS/links/provenance
+ContextService --> Agent : compact grounded context
 @enduml

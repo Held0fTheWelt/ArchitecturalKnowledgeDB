@@ -1,0 +1,19 @@
+@startuml akdb-authority-contexts
+title AKDB - Context-Dependent Authority
+rectangle "DB-native SAD/UML" as Native
+rectangle "Imported external architecture/evidence" as Imported
+rectangle "Registered Git provenance" as Git
+rectangle "Exported AKDB projection" as Projection
+database "AKDB knowledge database" as DB
+Native --> DB : canonical authoring record / akdb:// source
+Imported --> DB : indexed copy / original source URI retained
+Git --> DB : read-only commit/file evidence
+DB --> Projection : deterministic export
+Projection ..> Native : reviewable snapshot only
+note bottom
+Authority is not globally "files" or globally "database".
+For AKDB-authored SAD/UML the database is source of truth.
+For imported material the owning source remains authoritative.
+Git metadata is evidence; export files are projections.
+end note
+@enduml

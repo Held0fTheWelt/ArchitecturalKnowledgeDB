@@ -1,0 +1,23 @@
+@startuml agent-authoring-context
+title AKDB Agent-Authoring - System Context
+left to right direction
+actor "Coding agent" as Agent
+actor "Architecture maintainer" as Human
+rectangle "AKDB agent-authoring subsystem" as Subsystem
+rectangle "CLI / FastAPI / MCP surfaces" as Surfaces
+database "AKDB knowledge database\nSQLite or PostgreSQL" as DB
+folder "Registered repositories\nread-only evidence" as Repos
+rectangle "Optional embedding endpoint" as Embeddings
+rectangle "Tiny Tool Observatory\nand other consumers" as Consumers
+Agent --> Surfaces : recall, explore, author, review
+Human --> Surfaces : curate, validate, release
+Surfaces --> Subsystem
+Subsystem --> DB : project-scoped knowledge graph
+Subsystem --> Repos : provenance and file mapping reads
+Subsystem --> Embeddings : optional semantic vectors
+Subsystem --> Consumers : compact API/MCP results or exports
+note bottom
+Consumers remain outside this repository's data boundary.
+AKDB owns only its code, architecture and explicitly authored knowledge.
+end note
+@enduml

@@ -1,0 +1,18 @@
+@startuml akdb-document-lifecycle
+title AKDB - DB-Native Architecture Document Lifecycle
+[*] --> Draft : upsert document
+Draft --> Current : sections/decisions complete
+Current --> Current : DB-native edit
+Current --> Exported : deterministic export
+Exported --> Current : next DB-native edit
+Exported --> Verified : repeat export + tests + drift checks
+Verified --> Current : architecture/code change
+Current --> Superseded : replacement accepted
+Draft --> Deleted : explicit delete
+Superseded --> Deleted : explicit cleanup
+Deleted --> [*]
+note right of Exported
+Exported Markdown and PlantUML are projections.
+They are never the edit/import loop for this project.
+end note
+@enduml

@@ -114,6 +114,59 @@ def test_serve_loop_emits_one_line_per_request(tmp_path):
                for t in json.loads(lines[1])["result"]["tools"])
 
 
+def test_mcp_db_native_sad_authoring(tmp_path):
+    conn = _seed(tmp_path)
+    server = StdioServer(conn)
+    response = server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 10,
+            "method": "tools/call",
+            "params": {
+                "name": "akdb_upsert_sad",
+                "arguments": {
+                    "project_id": "p",
+                    "document_id": "root",
+                    "title": "Root architecture",
+                    "preamble_md": "# Root architecture",
+                },
+            },
+        }
+    )
+    assert "isError" not in response["result"]
+    response = server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 11,
+            "method": "tools/call",
+            "params": {
+                "name": "akdb_upsert_sad_section",
+                "arguments": {
+                    "project_id": "p",
+                    "document_id": "root",
+                    "section_id": "intro",
+                    "title": "1. Introduction",
+                    "order": 0,
+                    "body_md": "MCP-authored.",
+                },
+            },
+        }
+    )
+    assert "isError" not in response["result"]
+    payload = server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 12,
+            "method": "tools/call",
+            "params": {
+                "name": "akdb_get_sad",
+                "arguments": {"project_id": "p", "document_id": "root"},
+            },
+        }
+    )
+    assert "MCP-authored." in payload["result"]["content"][0]["text"]
+
+
 def test_stdio_transport_is_reconfigured_to_utf8():
     buffer = io.BytesIO()
     stream = io.TextIOWrapper(buffer, encoding="cp1252")

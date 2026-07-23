@@ -1,0 +1,34 @@
+@startuml completeness-validation-activity
+title AKDB Agent-Authoring - Completeness Validation (spec_validate)
+start
+:Load archetype contract from archetype_requirements.yml;
+note right: required_diagrams + file_map + blocking, by archetype (plugin/function/rule)
+:Collect spec_realizes_uml links -> realized diagrams;
+:Collect element_maps_to_file links for core (component-level) elements;
+if (all required_diagrams satisfied?) then (no)
+  :add missing_required_diagrams;
+else (yes)
+endif
+:Resolve each file-map target_ref against source_areas / repo;
+if (every target resolves?) then (no)
+  :add unresolved_file_map;
+else (yes)
+endif
+if (every core element covered by a file-map?) then (no)
+  :add uncovered_elements (warning);
+else (yes)
+endif
+:Check links point at existing items;
+if (dangling refs?) then (yes)
+  :add dangling_refs;
+else (no)
+endif
+:Write findings to consistency_findings;
+if (any blocking category non-empty?) then (yes)
+  :Refuse draft -> ready;
+  stop
+else (no)
+  :Allow draft -> ready;
+  stop
+endif
+@enduml

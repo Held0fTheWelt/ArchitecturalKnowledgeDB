@@ -54,7 +54,7 @@ If `akdb-mcp` is not on PATH, use the full interpreter form:
 
 ```json
 {
-  "command": "C:\\Users\\YvesT\\AppData\\Local\\Programs\\Python\\Python314\\python.exe",
+  "command": "python",
   "args": ["-m", "architectural_knowledge_db.mcp_stdio"]
 }
 ```
@@ -91,4 +91,6 @@ Use the same `mcpServers` JSON block as Cursor, in that client's config location
 
 ## Workspace Boundary
 
-AKDB MCP can read imported knowledge about external repositories, but this repository must not keep copied SAD/UML exports or public showcase files as committed docs. In the Tiny Tool workspace, public showcase/user scripts live in `D:\TinyToolDevelopment\Git\Tools`, with user scripts under `D:\TinyToolDevelopment\Git\Tools\User`.
+AKDB MCP can read imported knowledge about external repositories, but this repository commits only
+AKDB-owned code, documentation, tests, and its own generated SAD/UML projection. Tiny Tool
+Observatory and other tools keep their code, data, and architecture in their owning repositories.
