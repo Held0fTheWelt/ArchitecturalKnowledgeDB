@@ -90,4 +90,53 @@ freshness gate in CI while working fine locally. Fixed with a TDD regression tes
 (`_normalize_dest_root`), so DB rows are portable regardless of which OS registered them.
 Full suite re-verified green (203 passed, 147 skipped) before committing.
 
+## BLOCKED: `akdb-self` export target — do NOT sync (destructive, disabled defensively)
+
+Plan B Task 6.1 step 2 registers a second target, `akdb-self`, project
+`architectural-knowledge-db`, `dest_root=docs/architecture` (the AKDB tool repo's OWN
+self-authored architecture docs, per `config.py::self_export_target()`).
+
+**Investigated before syncing (per "STOP, do not guess past it") and found a real, would-be-
+destructive mismatch:** all 313 existing `architectural-knowledge-db`-project knowledge items
+(verified via direct read-only query against `.akdb/architectural_knowledge_db.sqlite`) have
+`metadata.repo_source_key = NULL` and `metadata.body_text = NULL` — EXCEPT one
+`product_fact_sheet`. These items were created by the OLDER self-ingest path documented in
+`docs/superpowers/evidence/2026-07-23-akdb-self-ingest.md` (`document import` / SAD
+decomposition against `Git/docs/architecture/plugins/ArchitecturalKnowledgeDB`), which
+predates this runway and never populates `repo_source_key`/`body_text` — only the NEW generic
+`import_documents`/`import_adrs` paths (Plan A) do that.
+
+Consequence: `_expected_mirror_files("architectural-knowledge-db", dest_root)` (used by BOTH
+`verify_export` and `export_sync`) would compute an **empty** expected set for this project
+(no item has `body_text`). `export_sync` would then treat every real file currently under
+`ArchitecturalKnowledgeDB/docs/architecture/**` (the hand-authored `architecture.md`,
+`dual-backend.md`, the whole `subsystems/**` and `UML/**` trees — this repo's own real,
+committed architecture documentation) as "extra" and **delete all of it**. `verify_export`
+would likewise report 100% of those files as spurious "extra" (harmless to run, but
+misleading/useless as a check here).
+
+**Action taken:** registered the target (harmless, a DB row) then immediately
+`set_enabled(..., False)` so no accidental future `export sync`/`export verify` call touches
+it, and so the (inert, since no item there carries `repo_source_key`) auto-flush hook can
+never activate for it either. **Did NOT run `export_sync`/`export_incremental`/`verify_export`
+against `akdb-self`** — no data was touched or lost.
+
+**Not fixed here** (out of scope for Plan A/B/C's task list, and NOT a "guess past it" fix
+appropriate to make silently on a live production DB): making AKDB's own self-docs flow
+through the new generic byte-exact path would mean re-ingesting
+`ArchitecturalKnowledgeDB/docs/architecture/**` via `import_documents`/`import_adrs` (so items
+gain `repo_source_key`/`body_text`), which changes item identity/shape for 313 existing items
+and needs its own reviewed plan + human go-ahead, not a side-effect of this runway.
+
+**Open question forwarded to the human** (also in the final report): should a follow-up task
+re-ingest AKDB's own self-docs through the generic export path so `akdb-self` becomes usable,
+or should self-hosting stay on the old SAD-decomposition path indefinitely (in which case
+`akdb-self` should probably be deleted/never enabled rather than left dormant)?
+
+Plan B/C below proceed with `ttd-canon` only, which IS on the correct byte-exact path (all
+its items — SAD/UML/ADR imported via `import_documents`/`import_adrs` — DO carry
+`repo_source_key` + `body_text`, confirmed above for the 10 real ADRs and consistent with how
+Phase 4 of the canon migration ingested `docs/architecture` + `UML` into `tiny-tool-
+development`).
+
 Next: hand off to Plan B on the TTD side (`chore/auto-export-mirror` off `5.4`).
