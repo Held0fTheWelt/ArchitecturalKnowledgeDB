@@ -10,7 +10,7 @@ from typing import Any
 import typer
 import uvicorn
 
-from architectural_knowledge_db.config import Settings, load_project_registry
+from architectural_knowledge_db.config import Settings, load_project_registry, self_export_target
 from architectural_knowledge_db.db.connection import initialize_database
 from architectural_knowledge_db.mcp import MCP_MANIFEST
 from architectural_knowledge_db.models import (
@@ -289,11 +289,23 @@ def export_adrs(
 @sad_app.command("export")
 def export_sad(
     project_id: str = typer.Option(..., "--project"),
-    folder: Path = typer.Option(..., "--folder"),
+    folder: Path | None = typer.Option(
+        None,
+        "--folder",
+        help="Export folder. Defaults to the workspace self-export target when known.",
+    ),
     document_local_id: str | None = typer.Option(None, "--document"),
 ) -> None:
+    target = folder
+    if target is None:
+        target = self_export_target(project_id)
+        if target is None:
+            raise typer.BadParameter(
+                "No --folder given and no self-export default for this project/workspace.",
+                param_hint="--folder",
+            )
     with _conn() as conn:
-        _print(ImportExportService(conn).export_sad(project_id, folder, document_local_id))
+        _print(ImportExportService(conn).export_sad(project_id, target, document_local_id))
 
 
 @adr_app.command("list")

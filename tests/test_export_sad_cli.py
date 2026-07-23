@@ -31,3 +31,30 @@ def test_cli_sad_export_writes_architecture_md(tmp_path: Path, monkeypatch) -> N
     text = (out / "architecture.md").read_text(encoding="utf-8")
     assert "## 1. Introduction" in text
     assert "### D1: First decision" in text
+
+
+def test_cli_sad_export_uses_self_export_default(tmp_path: Path, monkeypatch) -> None:
+    repo = tmp_path / "TinyToolDevelopment" / "ArchitecturalKnowledgeDB"
+    data = repo / ".akdb"
+    data.mkdir(parents=True)
+    db_path = data / "architectural_knowledge_db.sqlite"
+    monkeypatch.setenv("AKDB_DATA_ROOT", str(data))
+    monkeypatch.setenv("AKDB_DATABASE_PATH", str(db_path))
+    runner = CliRunner()
+
+    conn = initialize_database(db_path)
+    ProjectService(conn).upsert_project(
+        ProjectUpsert(project_id="architectural-knowledge-db", display_name="AKDB")
+    )
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "architecture.md").write_text(SAD, encoding="utf-8", newline="\n")
+    ImportExportService(conn).import_documents("architectural-knowledge-db", src)
+    conn.commit()
+    conn.close()
+
+    result = runner.invoke(app, ["sad", "export", "--project", "architectural-knowledge-db"])
+    assert result.exit_code == 0, result.output
+    out = repo / "docs" / "architecture" / "architecture.md"
+    assert out.is_file()
+    assert "## 1. Introduction" in out.read_text(encoding="utf-8")

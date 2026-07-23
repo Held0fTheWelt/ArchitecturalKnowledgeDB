@@ -66,20 +66,68 @@ def auto_export_root_for_database(database_path: Path | str) -> Path | None:
     return _auto_export_root(data_root, database)
 
 
-def _workspace_auto_export_root(data_root: Path, database_path: Path) -> Path | None:
+AKDB_SELF_PROJECT_ID = "architectural-knowledge-db"
+
+
+def self_export_target(
+    project_id: str,
+    *,
+    data_root: Path | str | None = None,
+    database_path: Path | str | None = None,
+) -> Path | None:
+    """Default arc42/SAD export folder for known AKDB workspace layouts.
+
+    - Standalone AKDB repo + project ``architectural-knowledge-db`` → ``<repo>/docs/architecture``
+    - Platform ``Tools/ArchitecturalKnowledgeDB`` layout → ``<workspace>/AKDB/export``
+    Explicit ``--folder`` / env roots remain authoritative when callers supply them.
+    """
+    layout = _workspace_layout(data_root, database_path)
+    if layout is None:
+        return None
+    kind, repo, workspace = layout
+    if kind == "platform":
+        return (workspace / "AKDB" / "export").resolve()
+    if kind == "standalone" and project_id == AKDB_SELF_PROJECT_ID:
+        return (repo / "docs" / "architecture").resolve()
+    return None
+
+
+def _workspace_layout(
+    data_root: Path | str | None,
+    database_path: Path | str | None,
+) -> tuple[str, Path, Path] | None:
     try:
-        data = data_root.resolve()
-        database = database_path.resolve()
+        if database_path is None:
+            database = Path(
+                os.getenv("AKDB_DATABASE_PATH", str(Path(os.getenv("AKDB_DATA_ROOT", ".akdb")) / "architectural_knowledge_db.sqlite"))
+            ).expanduser().resolve()
+        else:
+            database = Path(database_path).expanduser().resolve()
+        if data_root is None:
+            data = Path(os.getenv("AKDB_DATA_ROOT", str(database.parent))).expanduser().resolve()
+        else:
+            data = Path(data_root).expanduser().resolve()
     except OSError:
         return None
     if data.name.lower() != ".akdb" or database.parent != data:
         return None
     repo = data.parent
-    if repo.name != "ArchitecturalKnowledgeDB" or repo.parent.name != "Tools":
+    if repo.name != "ArchitecturalKnowledgeDB":
         return None
-    workspace = repo.parent.parent
-    if workspace.name != "TinyToolDevelopment":
+    if repo.parent.name == "Tools":
+        workspace = repo.parent.parent
+        if workspace.name != "TinyToolDevelopment":
+            return None
+        return ("platform", repo, workspace)
+    # Standalone public AKDB checkout (e.g. TinyToolDevelopment/ArchitecturalKnowledgeDB).
+    return ("standalone", repo, repo.parent)
+
+
+def _workspace_auto_export_root(data_root: Path, database_path: Path) -> Path | None:
+    layout = _workspace_layout(data_root, database_path)
+    if layout is None or layout[0] != "platform":
         return None
+    _, _, workspace = layout
     return workspace / "AKDB" / "export"
 
 
