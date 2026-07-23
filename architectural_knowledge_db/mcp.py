@@ -41,6 +41,7 @@ from architectural_knowledge_db.services.survey import SurveyService
 from architectural_knowledge_db.services.search import SearchService
 from architectural_knowledge_db.services.staleness import StalenessService
 from architectural_knowledge_db.services.uml import UMLService
+from architectural_knowledge_db.services.workspace import WorkspaceService
 
 
 # Bulk/list/search tools return many records at once. By default they strip large
@@ -303,6 +304,33 @@ MCP_MANIFEST: dict[str, Any] = {
         {
             "name": "akdb_export_adrs",
             "description": "Export ADR markdown files from the database.",
+            "input_schema": {
+                "type": "object",
+                "required": ["project_id", "folder"],
+                "properties": {"project_id": {"type": "string"}, "folder": {"type": "string"}},
+            },
+        },
+        {
+            "name": "akdb_workspace_scan",
+            "description": "Scan a registered repository's git-tracked files (+ markdown heading anchors) into its inventory.",
+            "input_schema": {
+                "type": "object",
+                "required": ["project_id", "repository_id"],
+                "properties": {"project_id": {"type": "string"}, "repository_id": {"type": "string"}},
+            },
+        },
+        {
+            "name": "akdb_resolve_reference",
+            "description": "Resolve a <repo>/<path>#<anchor> cross-repo reference from the workspace inventory alone.",
+            "input_schema": {
+                "type": "object",
+                "required": ["project_id", "ref"],
+                "properties": {"project_id": {"type": "string"}, "ref": {"type": "string"}},
+            },
+        },
+        {
+            "name": "akdb_export_workspace_manifest",
+            "description": "Export workspace-manifest.json (repo file lists + markdown anchors) from the inventory.",
             "input_schema": {
                 "type": "object",
                 "required": ["project_id", "folder"],
@@ -1195,6 +1223,13 @@ class McpDispatcher:
             return ImportExportService(self.conn).import_adrs(arguments["project_id"], arguments["folder"])
         if tool_name == "akdb_export_adrs":
             return ImportExportService(self.conn).export_adrs(arguments["project_id"], arguments["folder"])
+        if tool_name == "akdb_workspace_scan":
+            return WorkspaceService(self.conn).scan_inventory(arguments["project_id"], arguments["repository_id"])
+        if tool_name == "akdb_resolve_reference":
+            return WorkspaceService(self.conn).resolve_reference(arguments["project_id"], arguments["ref"])
+        if tool_name == "akdb_export_workspace_manifest":
+            path = WorkspaceService(self.conn).export_manifest(arguments["project_id"], arguments["folder"])
+            return {"project_id": arguments["project_id"], "manifest": path}
         if tool_name == "akdb_export_canon":
             return ImportExportService(self.conn).export_canon(arguments["project_id"], arguments["folder"])
         if tool_name == "akdb_verify_canon":
