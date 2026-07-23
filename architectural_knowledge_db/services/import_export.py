@@ -964,6 +964,7 @@ def parse_frontmatter(text: str) -> dict[str, Any]:
 
 
 def parse_sad_decisions(text: str) -> list[dict[str, str]]:
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
     decisions = []
     matches = list(SAD_DECISION_RE.finditer(text))
     for index, match in enumerate(matches):
@@ -988,6 +989,7 @@ def parse_sad_decisions(text: str) -> list[dict[str, str]]:
 
 def parse_sad_sections(text: str) -> list[dict[str, Any]]:
     """Split a SAD into its '## ' main sections with verbatim body text and order."""
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
     lines = text.splitlines(keepends=True)
     sections: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
