@@ -309,6 +309,25 @@ class ImportExportService:
         text = "\n".join(lines).rstrip("\n") + "\n"
         target.write_text(text, encoding="utf-8", newline="\n")
 
+    def _seen_local_ids_for_project(self, project_id: str) -> dict[tuple[str, str], str]:
+        """Seed the collision tracker from items already in the DB.
+
+        Lets import_documents() detect a document_id collision against an
+        EARLIER, separate call (e.g. docs/architecture then UML) rather than
+        only within the current call's loop.
+        """
+        seen: dict[tuple[str, str], str] = {}
+        rows = self.conn.execute(
+            "SELECT item_type, local_id, metadata_json FROM knowledge_items WHERE project_id = ?",
+            (project_id,),
+        ).fetchall()
+        for row in rows:
+            metadata = json.loads(row["metadata_json"] or "{}")
+            repo_key = metadata.get("repo_source_key")
+            if repo_key:
+                seen[(row["item_type"], row["local_id"])] = repo_key
+        return seen
+
     def import_documents(
         self,
         project_id: str,
@@ -323,29 +342,73 @@ class ImportExportService:
         exclude_patterns = exclude or []
         imported = []
         derived = []
+        # Disambiguate document_id collisions -- e.g. a UML `.puml` + `.md`
+        # companion pair sharing the same basename (spec class B) would
+        # otherwise upsert into the SAME item, silently discarding one file's
+        # body_text. document_id_for() intentionally ignores suffix (so unrelated
+        # single-file documents like "README.md" keep their stable short id); this
+        # tracks (item_type, local_id) -> repo_source_key and only disambiguates
+        # when a real collision (a DIFFERENT file) is detected. Keyed by
+        # repo_source_key (not the import-root-relative source_key) so it also
+        # catches CROSS-CALL collisions: docs/architecture/** and UML/** mirror
+        # the same plugin folder names, so e.g. both trees' "Demo/README.md"
+        # produce the identical document_id_for() result relative to their own
+        # call's root -- a real Phase 4 gap (2026-07-23) where the second
+        # import_documents() call (UML) silently overwrote the first's (docs)
+        # body_text. _seen_local_ids_for_project() seeds this from the live DB
+        # so it also catches collisions against an EARLIER, separate call.
+        seen_local_ids = self._seen_local_ids_for_project(project_id)
         for path in sorted(root.rglob("*")):
             if not path.is_file():
                 continue
             source_key = path.relative_to(root).as_posix()
-            if not _matches_any(source_key, include_patterns) or _matches_any(source_key, exclude_patterns):
+            if include_patterns == ["**/*"]:
+                # Explicit "every file" include: fnmatch's "**/*" requires a literal
+                # "/" (glob-style ** is not special to fnmatch), so top-level files
+                # like "START-HERE.md" would otherwise be silently skipped. An
+                # explicit "**/*" means "every file" — bypass the suffix allowlist
+                # entirely rather than trying to out-glob fnmatch. Default behavior
+                # (DEFAULT_DOCUMENT_PATTERNS) is unchanged.
+                matched = not _matches_any(source_key, exclude_patterns)
+            else:
+                matched = _matches_any(source_key, include_patterns) and not _matches_any(source_key, exclude_patterns)
+            if not matched:
                 continue
-            text = _read_text_exact(path)
+            text, encoding = _read_text_exact_any_encoding(path)
             document = parse_document_file(path, text, source_uri=str(path), source_key=source_key)
             classification = classify_document(source_key, path, document)
+            local_id = document["document_id"]
+            repo_key = repo_relative_key(path)
+            collision_key = (classification["item_type"], local_id)
+            previous_repo_key = seen_local_ids.get(collision_key)
+            if previous_repo_key is not None and previous_repo_key != repo_key:
+                suffix = path.suffix.lstrip(".").lower() or "file"
+                local_id = f"{local_id}--{suffix}"
+                collision_key = (classification["item_type"], local_id)
+                previous_repo_key = seen_local_ids.get(collision_key)
+                if previous_repo_key is not None and previous_repo_key != repo_key:
+                    # Same-suffix collision (e.g. two different trees' README.md):
+                    # the suffix alone can't disambiguate -- fall back to the
+                    # top-level repo tree segment (e.g. "docs" vs "uml").
+                    tree_segment = repo_key.split("/", 1)[0].lower() or "root"
+                    local_id = f"{local_id}--{tree_segment}"
+                    collision_key = (classification["item_type"], local_id)
+            seen_local_ids[collision_key] = repo_key
             metadata = {
                 **document.get("metadata", {}),
                 "source_key": document["source_key"],
-                "repo_source_key": repo_relative_key(path),
+                "repo_source_key": repo_key,
                 "format": document["format"],
                 "doc_kind": classification["doc_kind"],
                 "body_text": text,
+                "body_encoding": encoding,
                 "headings": document.get("headings", []),
             }
             item_uid = self.knowledge._upsert_item(
                 project_id=project_id,
                 space_id=None,
                 item_type=classification["item_type"],
-                local_id=document["document_id"],
+                local_id=local_id,
                 title=document["title"],
                 status=classification["status"],
                 authority_level=classification["authority_level"],
@@ -444,6 +507,106 @@ class ImportExportService:
             _write_text_exact(target, body_text)
             exported.append(target.relative_to(root).as_posix())
         return {"project_id": project_id, "folder": str(root), "exported": len(exported), "files": exported}
+
+    def export_canon(
+        self,
+        project_id: str,
+        folder: str | Path,
+        *,
+        clean: bool = True,
+        exclude: tuple[str, ...] = ("**/product-facts.yml", "**/product-facts.yaml"),
+    ) -> dict[str, Any]:
+        """Reproduce the canon at its original repo paths (byte-faithful whole-tree mirror).
+
+        Class H (product-facts.yml) is out of scope for the canon mirror (it
+        stays in Git) -- excluded here too because the project may also carry
+        unrelated pre-existing "product_fact_sheet" items (a separate AKDB
+        feature) that happen to reuse the repo_source_key/body_text metadata
+        shape; without this filter their (possibly stale) body_text would
+        leak into the mirror and cause spurious verify_canon "mismatched"
+        results against the live, since-edited file.
+        """
+        import fnmatch
+
+        root = Path(folder)
+        root.mkdir(parents=True, exist_ok=True)
+        if clean:
+            _clean_canon_export_root(root)
+        items = self.knowledge.list_items(project_id, include_shared=False, limit=100000)
+        exported: list[str] = []
+        for item in sorted(items, key=lambda it: (it.get("metadata") or {}).get("repo_source_key") or ""):
+            metadata = item.get("metadata") or {}
+            repo_key = metadata.get("repo_source_key")
+            body_text = metadata.get("body_text")
+            if not repo_key or body_text is None:
+                continue
+            if any(fnmatch.fnmatch(repo_key, pat) for pat in exclude):
+                continue
+            target = _target_for_source_key(root, repo_key, f"{item['local_id']}.md")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            _write_text_exact_with_encoding(target, body_text, metadata.get("body_encoding", "utf-8"))
+            exported.append(target.relative_to(root).as_posix())
+        self._write_canon_export_manifest(root, project_id, exported)
+        return {"project_id": project_id, "folder": str(root), "exported": len(exported), "files": exported}
+
+    def _write_canon_export_manifest(self, root: Path, project_id: str, files: list[str]) -> None:
+        manifest = {"files": sorted(files), "format_version": 1, "project_id": project_id}
+        (root / ".akdb-canon-export.json").write_text(
+            json.dumps(manifest, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+
+    def verify_canon(
+        self,
+        project_id: str,
+        live_root: str | Path,
+        *,
+        exclude: tuple[str, ...] = ("**/product-facts.yml", "**/product-facts.yaml"),
+    ) -> dict[str, Any]:
+        """Byte-diff a fresh canon export against the live repo tree (class-H excluded)."""
+        import fnmatch
+        import tempfile
+
+        live = Path(live_root)
+
+        def _excluded(rel: str) -> bool:
+            return any(fnmatch.fnmatch(rel, pat) for pat in exclude)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fresh = Path(tmp) / "export"
+            self.export_canon(project_id, fresh)
+            fresh_files = {
+                p.relative_to(fresh).as_posix(): p
+                for p in fresh.rglob("*")
+                if p.is_file() and p.name != ".akdb-canon-export.json"
+            }
+            live_files = {
+                p.relative_to(live).as_posix(): p
+                for p in live.rglob("*")
+                if p.is_file()
+                and (p.relative_to(live).as_posix().startswith("docs/architecture/")
+                     or p.relative_to(live).as_posix().startswith("UML/"))
+                and not _excluded(p.relative_to(live).as_posix())
+            }
+            matched = 0
+            mismatched: list[str] = []
+            for rel, fresh_path in sorted(fresh_files.items()):
+                live_path = live / rel
+                if live_path.is_file() and live_path.read_bytes() == fresh_path.read_bytes():
+                    matched += 1
+                else:
+                    mismatched.append(rel)
+            missing = sorted(set(live_files) - set(fresh_files))
+            extra = sorted(set(fresh_files) - set(live_files))
+        return {
+            "project_id": project_id,
+            "live_root": str(live),
+            "matched": matched,
+            "mismatched": mismatched,
+            "missing": missing,
+            "extra": extra,
+        }
 
     def export_links(self, project_id: str, folder: str | Path) -> dict[str, Any]:
         root = Path(folder)
@@ -1437,6 +1600,45 @@ def _write_text_exact(path: Path, text: str) -> None:
         handle.write(text)
 
 
+# BOM-prefixed encodings found in the real canon (e.g. Windows PowerShell
+# `> file.log` redirection emits UTF-16 LE). Kept as explicit byte prefixes
+# (rather than relying on the "utf-16"/"utf-8-sig" codecs' own BOM-on-encode
+# behavior, which is native-byte-order-dependent) so decode -> encode is a
+# deterministic, byte-exact round trip regardless of host architecture.
+_UTF16_LE_BOM = b"\xff\xfe"
+_UTF16_BE_BOM = b"\xfe\xff"
+_UTF8_BOM = b"\xef\xbb\xbf"
+
+
+def _decode_text_exact(raw: bytes) -> tuple[str, str]:
+    """Decode raw file bytes, returning (text, encoding) for an exact re-encode later."""
+    if raw.startswith(_UTF16_LE_BOM):
+        return raw[len(_UTF16_LE_BOM):].decode("utf-16-le"), "utf-16-le-bom"
+    if raw.startswith(_UTF16_BE_BOM):
+        return raw[len(_UTF16_BE_BOM):].decode("utf-16-be"), "utf-16-be-bom"
+    if raw.startswith(_UTF8_BOM):
+        return raw[len(_UTF8_BOM):].decode("utf-8"), "utf-8-sig"
+    return raw.decode("utf-8"), "utf-8"
+
+
+def _read_text_exact_any_encoding(path: Path) -> tuple[str, str]:
+    """Like _read_text_exact, but detects non-UTF-8 canon files instead of raising."""
+    return _decode_text_exact(path.read_bytes())
+
+
+def _write_text_exact_with_encoding(path: Path, text: str, encoding: str) -> None:
+    """Write text back using the exact encoding+BOM it was ingested with."""
+    if encoding == "utf-16-le-bom":
+        payload = _UTF16_LE_BOM + text.encode("utf-16-le")
+    elif encoding == "utf-16-be-bom":
+        payload = _UTF16_BE_BOM + text.encode("utf-16-be")
+    elif encoding == "utf-8-sig":
+        payload = _UTF8_BOM + text.encode("utf-8")
+    else:
+        payload = text.encode("utf-8")
+    path.write_bytes(payload)
+
+
 def _target_for_source_key(root: Path, source_key: Any, fallback: str) -> Path:
     rel = _safe_relative_export_path(str(source_key or ""), fallback)
     return root / Path(*rel.parts)
@@ -1457,6 +1659,29 @@ def _clean_export_root(root: Path) -> None:
             shutil.rmtree(target)
         elif target.exists():
             target.unlink()
+
+
+def _clean_canon_export_root(root: Path) -> None:
+    """Full wipe for export_canon()'s whole-tree mirror.
+
+    Real gap found in Phase 4 (2026-07-23): _clean_export_root() only clears
+    MANAGED_EXPORT_ENTRIES ("adr", "documents", "uml", ...) -- the OLDER,
+    separate per-type export layout used by export_corpus(). export_canon()
+    instead reproduces the live repo's own top-level layout ("docs/", "UML/"),
+    which is never in that allowlist, so a file whose source item was later
+    removed from the project (deleted/renamed live, or cleaned up as a stale
+    DB orphan) stayed on disk forever -- a silent, permanent drift in the
+    byte-faithful mirror that verify_canon() never catches (it exports into
+    a fresh temp dir, not this persistent root). export_canon() owns its
+    entire root exclusively, so a full wipe is correct here.
+    """
+    if not root.is_dir():
+        return
+    for entry in root.iterdir():
+        if entry.is_dir():
+            shutil.rmtree(entry)
+        else:
+            entry.unlink()
 
 
 def _auto_export_root_for_connection(conn: Any) -> Path | None:

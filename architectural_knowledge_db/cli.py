@@ -46,6 +46,7 @@ from architectural_knowledge_db.services.search import SearchService
 from architectural_knowledge_db.services.setup import StarterSetupService
 from architectural_knowledge_db.services.staleness import StalenessService
 from architectural_knowledge_db.services.uml import UMLService
+from architectural_knowledge_db.services.workspace import WorkspaceService
 
 
 app = typer.Typer(help="ArchitecturalKnowledgeDB local service CLI.")
@@ -63,6 +64,7 @@ stale_app = typer.Typer(help="Manage staleness reports.")
 mcp_app = typer.Typer(help="MCP manifest and dispatch helpers.")
 uml_app = typer.Typer(help="Import, export, and edit UML diagrams.")
 consistency_app = typer.Typer(help="Run consistency checks and inspect links.")
+workspace_app = typer.Typer(help="Multi-repo workspace inventory + cross-reference resolution.")
 
 app.add_typer(project_app, name="project")
 app.add_typer(repo_app, name="repo")
@@ -78,6 +80,7 @@ app.add_typer(stale_app, name="stale")
 app.add_typer(mcp_app, name="mcp")
 app.add_typer(uml_app, name="uml")
 app.add_typer(consistency_app, name="consistency")
+app.add_typer(workspace_app, name="workspace")
 
 
 @app.callback()
@@ -961,6 +964,56 @@ def _print(payload: Any) -> None:
     text = json.dumps(payload, indent=2, ensure_ascii=False, default=str)
     sys.stdout.buffer.write(text.encode("utf-8"))
     sys.stdout.buffer.write(b"\n")
+
+
+canon_app = typer.Typer(help="Whole-tree repo-native canon mirror export + verification.")
+app.add_typer(canon_app, name="canon")
+
+
+@canon_app.command("export")
+def canon_export(
+    project: str = typer.Option(..., "--project"),
+    folder: Path = typer.Option(..., "--folder"),
+) -> None:
+    with _conn() as conn:
+        _print(ImportExportService(conn).export_canon(project, folder))
+
+
+@canon_app.command("verify")
+def canon_verify(
+    project: str = typer.Option(..., "--project"),
+    folder: Path = typer.Option(..., "--folder", help="Live repo tree root to verify against."),
+) -> None:
+    with _conn() as conn:
+        _print(ImportExportService(conn).verify_canon(project, folder))
+
+
+@workspace_app.command("scan")
+def workspace_scan(
+    project_id: str = typer.Option(..., "--project"),
+    repository_id: str = typer.Option(..., "--repository-id"),
+) -> None:
+    with _conn() as conn:
+        _print(WorkspaceService(conn).scan_inventory(project_id, repository_id))
+
+
+@workspace_app.command("resolve")
+def workspace_resolve(
+    project_id: str = typer.Option(..., "--project"),
+    ref: str = typer.Argument(...),
+) -> None:
+    with _conn() as conn:
+        _print(WorkspaceService(conn).resolve_reference(project_id, ref))
+
+
+@workspace_app.command("export-manifest")
+def workspace_export_manifest(
+    project_id: str = typer.Option(..., "--project"),
+    folder: Path = typer.Option(..., "--folder"),
+) -> None:
+    with _conn() as conn:
+        path = WorkspaceService(conn).export_manifest(project_id, folder)
+    _print({"project_id": project_id, "manifest": path})
 
 
 export_app = typer.Typer(help="Deterministic corpus export and round-trip verification.")
