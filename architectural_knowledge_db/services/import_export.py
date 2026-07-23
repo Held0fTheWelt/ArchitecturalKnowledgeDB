@@ -712,7 +712,7 @@ class ImportExportService:
             {
                 p.relative_to(dest_root).as_posix(): p
                 for p in dest_root.rglob("*")
-                if p.is_file()
+                if p.is_file() and p.name not in _MIRROR_RESERVED_NAMES
             }
             if dest_root.is_dir()
             else {}
@@ -759,7 +759,7 @@ class ImportExportService:
             written.append(str(target_path))
         pruned: list[str] = []
         for existing in list(dest_root.rglob("*")):
-            if not existing.is_file():
+            if not existing.is_file() or existing.name in _MIRROR_RESERVED_NAMES:
                 continue
             rel = existing.relative_to(dest_root).as_posix()
             if rel not in expected:
@@ -1827,6 +1827,10 @@ _MIRROR_ROOT_RULES: tuple[tuple[str, str], ...] = (
     ("docs/ADR/", "ADR/"),
 )
 _MIRROR_EXCLUDE: tuple[str, ...] = ("**/product-facts.yml", "**/product-facts.yaml")
+# Hand-written, non-DB-backed marker files that are expected to live alongside a
+# mirror (e.g. the Plan B "do not edit, regenerated from AKDB" banner). Never
+# flagged as verify_export "extra" and never pruned by export_sync.
+_MIRROR_RESERVED_NAMES: frozenset[str] = frozenset({"GENERATED.md"})
 
 
 def _mirror_path(dest_root: str | Path, repo_source_key: str) -> Path | None:

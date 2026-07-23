@@ -62,3 +62,16 @@ def test_missing_and_extra_detected(conn, tmp_path, sync_helper):
     r = ImportExportService(conn).verify_export(pid, "m")
     assert any("architecture.md" in m for m in r["missing"])
     assert any("stray.md" in e for e in r["extra"])
+
+
+def test_generated_banner_at_dest_root_is_not_flagged_extra_or_pruned(conn, tmp_path, sync_helper):
+    # docs/architecture/_generated/GENERATED.md is a hand-written, non-DB-backed
+    # banner (Plan B Task 6.2) that must coexist with a clean verify_export and
+    # must survive export_sync's prune pass.
+    dest, pid = sync_helper(conn, tmp_path)
+    banner = Path(dest) / "GENERATED.md"
+    banner.write_text("# Generated -- do not edit\n", encoding="utf-8", newline="")
+    r = ImportExportService(conn).verify_export(pid, "m")
+    assert r["extra"] == [] and r["mismatched"] == [] and r["missing"] == []
+    ImportExportService(conn).export_sync(pid, "m")
+    assert banner.is_file()
