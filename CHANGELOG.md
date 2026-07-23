@@ -4,6 +4,37 @@ All notable changes to this project are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-07-23
+
+Arc42 self-documentation release: AKDB can export a deterministic `architecture.md` + `UML/`
+mirror from the database (`export_sad`), stores SAD `##` sections as `sad_section` items, and
+self-documents into `docs/architecture`. Builds on the 0.2.0 dual-backend release.
+
+### Added
+
+- **`export_sad`** — reassembles frontmatter, ordered `sad_section` items, and `sad_decision`
+  records into a deterministic arc42 `architecture.md`, and exports diagrams under `UML/`
+  (CLI `sad export`, MCP `akdb_export_sad`).
+- **`sad_section` storage** — SAD import now persists each `##` main section alongside existing
+  `document` / `sad_frontmatter` / `sad_decision` decomposition so export can round-trip prose.
+- **AKDB self-documentation** — the `architectural-knowledge-db` project is ingested and
+  exported into this repository's `docs/architecture` tree as a generated mirror (do not
+  hand-edit; regenerate via `sad export --project architectural-knowledge-db --folder docs/architecture`).
+- **Hyphenated SAD decision ids** — import accepts `D-<token>` decision headings (e.g. `D-DB`,
+  `D-SoR`) in addition to `D1`-style ids.
+
+### Changed
+
+- **Package metadata**: version `0.3.0`; FastAPI `version=` aligned.
+- **Default self-export target** convenience for AKDB's own project points at `docs/architecture`
+  when configured for local maintainer workflows.
+
+### Notes
+
+- Hand-authored SAD retirement in the private `Git` repo (Phase 4) remains blocked until
+  generated-vs-hand-authored equivalence passes; this release ships the export capability and
+  the committed self-mirror without deleting the residual hand-authored copy.
+
 ## [0.2.0] - 2026-07-23
 
 Optional dual-backend release: SQLite remains the zero-setup default; PostgreSQL is an
