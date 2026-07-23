@@ -114,7 +114,7 @@ detail: Demo detail.
     links = conn.execute("SELECT link_type, target_ref FROM knowledge_links WHERE project_id = ?", ("akdb",)).fetchall()
 
     assert result["imported"] == 2
-    assert result["derived"] == 2
+    assert result["derived"] == 3
     assert {item["item_type"] for item in items} == {"sad", "sad_frontmatter", "sad_decision", "product_fact_sheet"}
     assert any(row["link_type"] == "references_adr" and row["target_ref"] == "ADR-PROD-0003" for row in links)
     assert any(row["link_type"] == "references_product_facts" for row in links)

@@ -539,6 +539,31 @@ class ImportExportService:
                 evidence=f"SAD decision import {document['source_key']}#{decision['decision_id']}",
             )
             created.append(item)
+
+        for section in parse_sad_sections(text):
+            local_id = f"{document['document_id']}:section:{section['order']:02d}"
+            item_uid = self.knowledge._upsert_item(
+                project_id=project_id,
+                space_id=None,
+                item_type="sad_section",
+                local_id=local_id,
+                title=section["title"],
+                status=None,
+                authority_level="project_note",
+                summary=None,
+                source_uri=str(path),
+                metadata={
+                    "source_key": document["source_key"],
+                    "repo_source_key": repo_relative_key(path),
+                    "parent_item_uid": parent_item["item_uid"],
+                    "order": section["order"],
+                    "level": section["level"],
+                    "role": section["role"],
+                    "body_md": section["body_md"],
+                },
+            )
+            self.knowledge._index_item(item_uid)
+            created.append(self.knowledge.get_item_by_uid(item_uid))
         return created
 
     def _link_targets(
@@ -677,14 +702,23 @@ def render_adr_markdown(adr: dict[str, Any]) -> str:
 
 def section_role(title: str) -> str:
     normalized = re.sub(r"[^a-z0-9]+", "_", title.lower()).strip("_")
-    return {
+    bare = re.sub(r"^\d+_", "", normalized)
+    roles = {
         "status": "status",
         "context": "context",
         "decision": "decision",
         "consequences": "consequences",
         "supersedes": "supersedes",
         "superseded_by": "superseded_by",
-    }.get(normalized, "other")
+        "decisions": "decisions",
+        "architecture_decisions": "decisions",
+        "architecture_decision": "decisions",
+    }
+    if bare in roles:
+        return roles[bare]
+    if bare.endswith("_decisions") or "architecture_decision" in bare:
+        return "decisions"
+    return roles.get(normalized, "other")
 
 
 def section_body(sections: list[dict[str, Any]], role: str) -> str:
@@ -875,6 +909,35 @@ def parse_sad_decisions(text: str) -> list[dict[str, str]]:
             }
         )
     return decisions
+
+
+def parse_sad_sections(text: str) -> list[dict[str, Any]]:
+    """Split a SAD into its '## ' main sections with verbatim body text and order."""
+    lines = text.splitlines(keepends=True)
+    sections: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+    order = 0
+    for line in lines:
+        m = HEADING_RE.match(line.rstrip("\n"))
+        if m and len(m.group(1)) == 2:
+            if current is not None:
+                current["body_md"] = "".join(current.pop("_body")).strip("\n")
+                sections.append(current)
+            title = m.group(2).strip()
+            current = {
+                "order": order,
+                "level": 2,
+                "title": title,
+                "role": section_role(title),
+                "_body": [],
+            }
+            order += 1
+        elif current is not None:
+            current["_body"].append(line)
+    if current is not None:
+        current["body_md"] = "".join(current.pop("_body")).strip("\n")
+        sections.append(current)
+    return sections
 
 
 def is_sad_document(path: Path, document: dict[str, Any]) -> bool:
