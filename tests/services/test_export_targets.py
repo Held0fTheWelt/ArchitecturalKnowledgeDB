@@ -49,6 +49,18 @@ def test_drain_includes_untargeted_rows(conn):
     assert [d["item_ref"] for d in svc.drain_dirty(pid, "ttd-canon")] == ["r1"]
 
 
+def test_register_normalizes_backslashes_to_posix_for_cross_platform_dest_root(conn):
+    # A target registered on Windows (typer.Path str() uses "\\") must still resolve
+    # correctly when the freshness gate / CI later runs `Path(dest_root) / ...` on
+    # Linux, where "\\" is not a path separator.
+    pid = _proj(conn)
+    svc = ExportTargetsService(conn)
+    svc.register_target(pid, "t", repository_id="Git",
+                        dest_root="docs\\architecture\\_generated", layout="arc42-canon",
+                        content_kinds=["sad"])
+    assert svc.get_target(pid, "t")["dest_root"] == "docs/architecture/_generated"
+
+
 def test_set_enabled(conn):
     pid = _proj(conn)
     svc = ExportTargetsService(conn)

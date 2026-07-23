@@ -53,7 +53,7 @@ class ExportTargetsService:
                 project_id,
                 target_id,
                 repository_id,
-                dest_root,
+                _normalize_dest_root(dest_root),
                 layout,
                 dumps(content_kinds),
                 _bool_param(self.conn, auto_export),
@@ -143,6 +143,13 @@ class ExportTargetsService:
                 (project_id, target_id),
             ).fetchall()
         return [dict(row) for row in rows]
+
+
+def _normalize_dest_root(dest_root: str) -> str:
+    # Registration can happen on Windows (typer.Path str() renders "\\"), while the
+    # freshness gate / CI may later run `Path(dest_root) / ...` on Linux, where "\\"
+    # is not a path separator. Store POSIX-style so it resolves on either OS.
+    return str(dest_root).replace("\\", "/")
 
 
 def _bool_param(conn: Any, value: bool) -> Any:
