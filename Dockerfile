@@ -16,7 +16,7 @@ COPY pyproject.toml README.md* /app/
 COPY docs /app/docs
 COPY architectural_knowledge_db /app/architectural_knowledge_db
 
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir ".[postgres]"
 
 EXPOSE 8787
 VOLUME ["/data", "/sources"]
