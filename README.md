@@ -96,9 +96,13 @@ Start here:
 - [FAQ](docs/user/FAQ.md)
 - [MCP Access](docs/operations/MCP.md)
 - [PostgreSQL (opt-in)](docs/operations/postgres.md)
+- [Dual-backend architecture](docs/architecture/dual-backend.md)
+- [Architecture decisions](docs/adr/README.md)
 - [Internal docs relocation note](docs/INTERNAL_DOCS_RELOCATED.md)
 
-Public user documentation only. Architecture specs, ADRs, contracts, schema, planning, and the maintainer runbook were evacuated to the private Tiny Tool Development `Git` repository after a public leak remediation (see `INTERNAL_DOCS_RELOCATED.md`).
+Public AKDB-specific architecture and decisions belong in this repository. Private planning,
+cross-project SAD/UML, contracts, generated exports, and the maintainer runbook remain outside
+it (see `INTERNAL_DOCS_RELOCATED.md`).
 
 ## Repository Boundary
 

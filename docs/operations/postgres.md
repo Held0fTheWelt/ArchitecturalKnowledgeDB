@@ -56,5 +56,5 @@ Those assume a single SQLite file on disk and are not valid for a Postgres DSN.
 ## Related
 
 - [Repository README — Storage backends](../../README.md#storage-backends)
-- Design: `docs/superpowers/specs/2026-07-23-akdb-dual-backend-sqlite-postgres-design.md`
-- Decision record: `Git/docs/ADR/Project/governance/adr-ttd-0006-akdb-sqlite-default-postgres-opt-in.md` (workspace-relative from `TinyToolDevelopment`)
+- [Dual-backend architecture](../architecture/dual-backend.md)
+- [ADR-AKDB-0001: SQLite default and PostgreSQL opt-in](../adr/ADR-AKDB-0001-dual-backend.md)

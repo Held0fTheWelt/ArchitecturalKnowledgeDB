@@ -1,8 +1,10 @@
 # AKDB Documentation (public extra-tools surface)
 
-This folder documents how to run and use ArchitecturalKnowledgeDB on the public extra-tools repository. It contains buyer-safe user documentation, MCP setup, and examples only.
+This folder documents how to run, use, operate, and understand ArchitecturalKnowledgeDB.
 
-Internal AKDB architecture specs, ADRs, contracts, schema reference, planning, and the maintainer runbook were evacuated to the private Tiny Tool Development `Git` repository after public leak remediation. See [INTERNAL_DOCS_RELOCATED.md](INTERNAL_DOCS_RELOCATED.md).
+Public AKDB-specific architecture and decisions live here. Private planning, cross-project
+SAD/UML, contracts, generated exports, and the maintainer runbook remain outside this
+repository. See [INTERNAL_DOCS_RELOCATED.md](INTERNAL_DOCS_RELOCATED.md).
 
 ## Where To Start
 
@@ -15,6 +17,8 @@ Internal AKDB architecture specs, ADRs, contracts, schema reference, planning, a
 | Fix a local run or MCP setup | [user/TROUBLESHOOTING.md](user/TROUBLESHOOTING.md) |
 | Connect an MCP client | [operations/MCP.md](operations/MCP.md) |
 | Use PostgreSQL (opt-in) | [operations/postgres.md](operations/postgres.md) |
+| Understand the storage architecture | [architecture/dual-backend.md](architecture/dual-backend.md) |
+| Review AKDB decisions | [adr/README.md](adr/README.md) |
 | Internal docs relocation | [INTERNAL_DOCS_RELOCATED.md](INTERNAL_DOCS_RELOCATED.md) |
 
 ## Folder Map
@@ -23,6 +27,8 @@ Internal AKDB architecture specs, ADRs, contracts, schema reference, planning, a
 | --- | --- |
 | `user/` | Practical user documentation: quick start, manual, settings, troubleshooting, FAQ, third-party notes. |
 | `operations/` | MCP setup, PostgreSQL opt-in ops, and public operations notes. |
+| `architecture/` | Public AKDB component and backend architecture. |
+| `adr/` | Public decisions governing AKDB itself. |
 | `examples/` | Registry, compose, and standalone sample inputs. |
 
 ## Documentation Boundary
