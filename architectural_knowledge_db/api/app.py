@@ -8,7 +8,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
 
 from architectural_knowledge_db.config import Settings
-from architectural_knowledge_db.db.connection import initialize_database
+from architectural_knowledge_db.db.connection import connect, initialize_database
 from architectural_knowledge_db.mcp import MCP_MANIFEST, McpDispatcher
 from architectural_knowledge_db.models import (
     AdrInput,
@@ -41,12 +41,21 @@ from architectural_knowledge_db.services.staleness import StalenessService
 from architectural_knowledge_db.services.uml import UMLService
 
 
+_migrated_database_paths: set[str] = set()
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="ArchitecturalKnowledgeDB Knowledge DB API",
         version="0.1.1",
         description="Multi-project DB-first architecture knowledge service with linked Git provenance.",
     )
+    database_path = Settings.from_env().database_path
+    migrated_key = str(database_path.resolve())
+    if migrated_key not in _migrated_database_paths:
+        _init = initialize_database(database_path)
+        _init.close()
+        _migrated_database_paths.add(migrated_key)
 
     @app.get("/health")
     def health(conn: Annotated[sqlite3.Connection, Depends(get_connection)]) -> dict[str, Any]:
@@ -398,7 +407,7 @@ def create_app() -> FastAPI:
 
 
 def get_connection() -> sqlite3.Connection:
-    conn = initialize_database(Settings.from_env().database_path)
+    conn = connect(Settings.from_env().database_path)
     try:
         yield conn
         conn.commit()
