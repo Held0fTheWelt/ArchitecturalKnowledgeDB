@@ -671,6 +671,106 @@ class ImportExportService:
             written.append(str(mirror_path))
         return {"written": written, "deleted": deleted, "skipped": skipped}
 
+    def _expected_mirror_files(self, project_id: str, dest_root: Path) -> dict[str, tuple[str, str]]:
+        """{mirror-relative path: (body_text, body_encoding)} for every item mappable into dest_root.
+
+        Same source of truth as export_canon: every project item carrying
+        repo_source_key + body_text, routed through _mirror_path. This is the
+        full-rebuild set used by both verify_export (byte compare) and
+        export_sync (full write); export_incremental only ever writes a subset
+        of this same mapping, so all three are provably consistent.
+        """
+        items = self.knowledge.list_items(project_id, include_shared=False, limit=100000)
+        expected: dict[str, tuple[str, str]] = {}
+        for item in items:
+            metadata = item.get("metadata") or {}
+            repo_key = metadata.get("repo_source_key")
+            body_text = metadata.get("body_text")
+            if not repo_key or body_text is None:
+                continue
+            mirror_path = _mirror_path(dest_root, repo_key)
+            if mirror_path is None:
+                continue
+            rel = mirror_path.relative_to(dest_root).as_posix()
+            expected[rel] = (body_text, metadata.get("body_encoding", "utf-8"))
+        return expected
+
+    def verify_export(self, project_id: str, target_id: str) -> dict[str, Any]:
+        """Byte-compare a fresh regeneration against the committed target mirror.
+
+        The correctness engine behind the freshness gate: matched/mismatched/
+        missing/extra, independent of the (speed-only) dirty queue.
+        """
+        from architectural_knowledge_db.services.export_targets import ExportTargetsService
+
+        target = ExportTargetsService(self.conn).get_target(project_id, target_id)
+        if target is None:
+            raise ValueError(f"Unknown export target {target_id} in project {project_id}")
+        dest_root = Path(target["dest_root"])
+        expected = self._expected_mirror_files(project_id, dest_root)
+        actual = (
+            {
+                p.relative_to(dest_root).as_posix(): p
+                for p in dest_root.rglob("*")
+                if p.is_file()
+            }
+            if dest_root.is_dir()
+            else {}
+        )
+        matched = 0
+        mismatched: list[str] = []
+        for rel, (body_text, encoding) in sorted(expected.items()):
+            actual_path = actual.get(rel)
+            if actual_path is None:
+                continue
+            expected_bytes = _encode_text_exact(body_text, encoding)
+            if actual_path.read_bytes() == expected_bytes:
+                matched += 1
+            else:
+                mismatched.append(rel)
+        missing = sorted(set(expected) - set(actual))
+        extra = sorted(set(actual) - set(expected))
+        return {
+            "project_id": project_id,
+            "target_id": target_id,
+            "dest_root": str(dest_root),
+            "matched": matched,
+            "mismatched": mismatched,
+            "missing": missing,
+            "extra": extra,
+        }
+
+    def export_sync(self, project_id: str, target_id: str) -> dict[str, Any]:
+        """Full rebuild of a target's mirror: write everything expected, prune extras, clear its dirty queue."""
+        from architectural_knowledge_db.services.export_targets import ExportTargetsService
+
+        targets = ExportTargetsService(self.conn)
+        target = targets.get_target(project_id, target_id)
+        if target is None:
+            raise ValueError(f"Unknown export target {target_id} in project {project_id}")
+        dest_root = Path(target["dest_root"])
+        dest_root.mkdir(parents=True, exist_ok=True)
+        expected = self._expected_mirror_files(project_id, dest_root)
+        written: list[str] = []
+        for rel, (body_text, encoding) in expected.items():
+            target_path = dest_root / Path(*PurePosixPath(rel).parts)
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            _write_text_exact_with_encoding(target_path, body_text, encoding)
+            written.append(str(target_path))
+        pruned: list[str] = []
+        for existing in list(dest_root.rglob("*")):
+            if not existing.is_file():
+                continue
+            rel = existing.relative_to(dest_root).as_posix()
+            if rel not in expected:
+                existing.unlink()
+                pruned.append(str(existing))
+        for existing in sorted(dest_root.rglob("*"), reverse=True):
+            if existing.is_dir() and not any(existing.iterdir()):
+                existing.rmdir()
+        targets.drain_dirty(project_id, target_id)
+        return {"written": written, "pruned": pruned}
+
     def _find_by_repo_source_key(self, project_id: str, repo_source_key: str) -> tuple[str, str] | None:
         row = self.conn.execute(
             """
@@ -1705,17 +1805,20 @@ def _read_text_exact_any_encoding(path: Path) -> tuple[str, str]:
     return _decode_text_exact(path.read_bytes())
 
 
+def _encode_text_exact(text: str, encoding: str) -> bytes:
+    """Byte-encode text using the exact encoding+BOM it was ingested with."""
+    if encoding == "utf-16-le-bom":
+        return _UTF16_LE_BOM + text.encode("utf-16-le")
+    if encoding == "utf-16-be-bom":
+        return _UTF16_BE_BOM + text.encode("utf-16-be")
+    if encoding == "utf-8-sig":
+        return _UTF8_BOM + text.encode("utf-8")
+    return text.encode("utf-8")
+
+
 def _write_text_exact_with_encoding(path: Path, text: str, encoding: str) -> None:
     """Write text back using the exact encoding+BOM it was ingested with."""
-    if encoding == "utf-16-le-bom":
-        payload = _UTF16_LE_BOM + text.encode("utf-16-le")
-    elif encoding == "utf-16-be-bom":
-        payload = _UTF16_BE_BOM + text.encode("utf-16-be")
-    elif encoding == "utf-8-sig":
-        payload = _UTF8_BOM + text.encode("utf-8")
-    else:
-        payload = text.encode("utf-8")
-    path.write_bytes(payload)
+    path.write_bytes(_encode_text_exact(text, encoding))
 
 
 _MIRROR_ROOT_RULES: tuple[tuple[str, str], ...] = (
