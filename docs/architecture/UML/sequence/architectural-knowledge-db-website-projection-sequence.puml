@@ -1,0 +1,27 @@
+@startuml architecturalknowledgedb-website-projection-sequence
+title ArchitecturalKnowledgeDB - Website And Atlas Projection Sequence
+
+actor Maintainer
+participant "AKDB SAD\n+ product-facts.yml" as Facts
+participant "Website facts_loader\n+ product catalog" as Catalog
+participant "Tool page\n+ deep dive content" as DeepDive
+participant "Atlas data join" as Atlas
+participant "Static build / deploy snapshot" as Build
+actor "Website reader" as Reader
+
+Maintainer -> Facts : update AKDB boundary, usage, integrations
+Facts -> Catalog : fact overlay supplies category/status/summary/detail
+Catalog -> Build : literal Outer Tool entry + snapshot fallback
+Maintainer -> DeepDive : curate usage, working modes, benefits, integrations
+DeepDive -> Build : render AKDB feature page
+Facts -> Atlas : product identity + category join
+Atlas -> Build : emit AKDB node and relationships
+Build -> Reader : Outer Tools list, AKDB page, Atlas node
+
+note over Facts,Build
+  Website content can feature AKDB strongly,
+  but source files and SAD/UML remain authoritative.
+  The deploy snapshot exists because Cloudflare may not see the sibling Git repo.
+end note
+
+@enduml

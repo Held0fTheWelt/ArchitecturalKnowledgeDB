@@ -1,0 +1,36 @@
+@startuml architecturalknowledgedb-c4-context
+title ArchitecturalKnowledgeDB - C4 Context
+
+actor "Architecture maintainer" as Maintainer
+actor "Coding agent / MCP client" as Agent
+actor "Website reader / evaluator" as Reader
+rectangle "AIaGMW\n(optional outer tool)" as AIaGMW
+rectangle "ArchitecturalKnowledgeDB\nOuter Tool" as AKDB
+rectangle "Tiny Tool Website + Atlas\nstatic projection" as Website
+database "SQLite + FTS\nproject knowledge DB" as DB
+folder "Normative architecture sources\nGit/docs, Git/UML, ADRs, gates, schemas" as Sources
+folder "Registered source repositories" as Repos
+
+Maintainer --> AKDB : import, search, check drift
+Agent --> AKDB : MCP search/context/tools
+AIaGMW --> AKDB : optional context/read import
+Reader --> Website : discover usage, benefits, integrations
+Sources --> AKDB : imported and reingested
+Repos --> AKDB : read-only Git/source metadata
+Sources --> Website : product facts + curated SAD-backed copy
+AKDB --> DB : stores indexed knowledge
+AKDB --> Maintainer : context packs, findings, provenance
+AKDB --> Agent : authority-aware responses
+Website --> Reader : AKDB Outer Tool page + Atlas node
+
+note right of Sources
+  Files remain authoritative.
+  AKDB is a derived index and context service.
+end note
+
+note bottom of Website
+  Website celebrates AKDB as a product surface,
+  but it is a static projection, not runtime authority.
+end note
+
+@enduml

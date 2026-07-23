@@ -1,0 +1,79 @@
+@startuml architecturalknowledgedb-c4-component
+title ArchitecturalKnowledgeDB - C4 Component View
+
+package "Service layer" {
+  component "ProjectService" as ProjectService
+  component "KnowledgeService" as KnowledgeService
+  component "ContextService" as ContextService
+  component "ConsistencyService" as ConsistencyService
+  component "StalenessService" as StalenessService
+  component "RepositoryService" as RepositoryService
+  component "GitScannerService" as GitScannerService
+  component "ImportExportService" as ImportExportService
+  component "ReingestService" as ReingestService
+  component "Cognition / authoring services" as Cognition
+  component "MemoryService" as MemoryService
+  component "Reasoning / survey / review services" as Reasoning
+  component "GuardrailService" as GuardrailService
+  component "VectorBackend\noptional" as VectorBackend
+}
+
+database "SQLite connection\nmigrations + FTS" as DB
+component "McpDispatcher" as MCP
+component "FastAPI routers" as API
+component "Typer CLI commands" as CLI
+
+CLI --> ProjectService
+CLI --> ImportExportService
+CLI --> ContextService
+API --> ProjectService
+API --> ContextService
+API --> ConsistencyService
+MCP --> ContextService
+MCP --> Cognition
+MCP --> ConsistencyService
+MCP --> MemoryService
+MCP --> Reasoning
+MCP --> GuardrailService
+MCP --> ReingestService
+
+ProjectService --> DB
+KnowledgeService --> DB
+ContextService --> KnowledgeService
+ContextService --> DB
+ConsistencyService --> DB
+StalenessService --> DB
+RepositoryService --> DB
+GitScannerService --> RepositoryService
+GitScannerService --> DB
+ImportExportService --> KnowledgeService
+ReingestService --> ImportExportService
+ReingestService --> GitScannerService
+Cognition --> KnowledgeService
+Cognition --> DB
+MemoryService --> DB
+Reasoning --> KnowledgeService
+Reasoning --> DB
+GuardrailService --> KnowledgeService
+VectorBackend --> DB
+
+note right of ImportExportService
+  YAML import preserves single-document payloads.
+  Multi-document streams retain source order under
+  document_count + documents and do not abort reingest.
+end note
+
+note bottom of DB
+  Migrations are additive and project-aware.
+  SQLite rows are indexed knowledge, not source authority.
+end note
+
+note right of MCP
+  Bulk/list/search tools are compact by default.
+  detail=full is an explicit depth request.
+  MCP stdio configures UTF-8 before JSON-RPC so
+  Windows console encodings cannot corrupt tool
+  manifests or architecture responses.
+end note
+
+@enduml

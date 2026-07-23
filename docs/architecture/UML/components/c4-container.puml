@@ -1,0 +1,45 @@
+@startuml architecturalknowledgedb-c4-container
+title ArchitecturalKnowledgeDB - C4 Container View
+
+package "ArchitecturalKnowledgeDB" {
+  component "CLI\nakdb / architectural-knowledge-db" as CLI
+  component "FastAPI service\n+ admin UI" as API
+  component "MCP stdio server\nakdb-mcp" as MCP
+  component "Service layer" as Services
+  component "Import/export pipelines" as Importers
+  component "Repository + Git scanner" as GitScanner
+  component "Search/context/cognition" as Recall
+  component "Reingest + drift runners" as Reingest
+  component "Optional vector recall\nLLM Store compatible endpoint" as Vector
+  database "SQLite database\nFTS5 + project-aware tables" as DB
+}
+
+folder "Architecture corpus" as Corpus
+folder "Registered repositories" as Repos
+artifact "product-facts.yml\n+ AKDB SAD" as ProductFacts
+rectangle "Website catalog,\ndeep dive, Atlas" as Website
+actor "Human / agent clients" as Clients
+actor "Website reader" as Reader
+
+Clients --> CLI
+Clients --> API
+Clients --> MCP
+CLI --> Services
+API --> Services
+MCP --> Services
+Services --> Importers
+Services --> GitScanner
+Services --> Recall
+Services --> Reingest
+Recall --> Vector : optional embeddings
+Importers --> Corpus : read docs/UML/ADR
+GitScanner --> Repos : read-only scan
+Importers --> DB
+GitScanner --> DB
+Recall --> DB
+Reingest --> Importers : refresh source-derived state
+Reingest --> GitScanner : optional provenance refresh
+ProductFacts --> Website : factual projection input
+Website --> Reader : featured Outer Tool page
+
+@enduml
