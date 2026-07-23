@@ -126,13 +126,17 @@ class ImportExportService:
         root = Path(folder)
         root.mkdir(parents=True, exist_ok=True)
         frontmatter = self._sad_children(project_id, "sad_frontmatter", document_local_id)
+        preambles = self._sad_children(project_id, "sad_preamble", document_local_id)
         sections = sorted(
             self._sad_children(project_id, "sad_section", document_local_id),
             key=lambda it: (it.get("metadata") or {}).get("order", 0),
         )
         decisions = sorted(
             self._sad_children(project_id, "sad_decision", document_local_id),
-            key=lambda it: (it.get("metadata") or {}).get("decision_id", ""),
+            key=lambda it: (
+                (it.get("metadata") or {}).get("order", 5000),
+                (it.get("metadata") or {}).get("decision_id", ""),
+            ),
         )
         lines: list[str] = []
         if frontmatter:
@@ -146,10 +150,19 @@ class ImportExportService:
                     "---",
                     "",
                 ]
+        if preambles:
+            preamble = (preambles[0].get("metadata") or {}).get("body_md", "").strip("\n")
+            if preamble:
+                lines += [preamble, ""]
         for sec in sections:
             md = sec.get("metadata") or {}
             lines += [f"{'#' * md.get('level', 2)} {sec['title']}", ""]
             if md.get("role") == "decisions":
+                section_body = (md.get("body_md") or "").strip("\n")
+                first_decision = SAD_DECISION_RE.search(section_body)
+                prefix = section_body[: first_decision.start()].strip("\n") if first_decision else section_body
+                if prefix:
+                    lines += [_sync_decision_summary(prefix, decisions), ""]
                 for d in decisions:
                     dm = d.get("metadata") or {}
                     did = dm.get("decision_id", "")
@@ -582,6 +595,29 @@ class ImportExportService:
             )
             created.append(item)
 
+        preamble = parse_sad_preamble(text)
+        if preamble:
+            local_id = f"{document['document_id']}:preamble"
+            item_uid = self.knowledge._upsert_item(
+                project_id=project_id,
+                space_id=None,
+                item_type="sad_preamble",
+                local_id=local_id,
+                title=f"{document['title']} preamble",
+                status=None,
+                authority_level="project_note",
+                summary=first_sentence(preamble),
+                source_uri=str(path),
+                metadata={
+                    "source_key": document["source_key"],
+                    "repo_source_key": repo_relative_key(path),
+                    "parent_item_uid": parent_item["item_uid"],
+                    "body_md": preamble,
+                },
+            )
+            self.knowledge._index_item(item_uid)
+            created.append(self.knowledge.get_item_by_uid(item_uid))
+
         for decision in parse_sad_decisions(text):
             local_id = f"{document['document_id']}:decision:{decision['decision_id'].lower()}"
             item_uid = self.knowledge._upsert_item(
@@ -599,6 +635,7 @@ class ImportExportService:
                     "repo_source_key": repo_relative_key(path),
                     "parent_item_uid": parent_item["item_uid"],
                     "decision_id": decision["decision_id"],
+                    "order": decision["order"],
                     "body_md": decision["body_md"],
                 },
             )
@@ -963,7 +1000,7 @@ def parse_frontmatter(text: str) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def parse_sad_decisions(text: str) -> list[dict[str, str]]:
+def parse_sad_decisions(text: str) -> list[dict[str, Any]]:
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     decisions = []
     matches = list(SAD_DECISION_RE.finditer(text))
@@ -977,7 +1014,8 @@ def parse_sad_decisions(text: str) -> list[dict[str, str]]:
         status_match = re.search(r"\*\*Status:\*\*\s*([A-Za-z_ -]+)", body)
         decisions.append(
             {
-                "decision_id": match.group("decision_id").upper(),
+                "decision_id": match.group("decision_id"),
+                "order": index,
                 "title": match.group("title").strip(),
                 "status": (status_match.group(1).strip().lower() if status_match else "accepted"),
                 "summary": first_sentence(body) or match.group("title").strip(),
@@ -985,6 +1023,65 @@ def parse_sad_decisions(text: str) -> list[dict[str, str]]:
             }
         )
     return decisions
+
+
+def parse_sad_preamble(text: str) -> str:
+    """Return structured content between optional frontmatter and the first main section."""
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    frontmatter_match = FRONTMATTER_RE.match(text)
+    start = frontmatter_match.end() if frontmatter_match else 0
+    first_section = SAD_MAIN_SECTION_RE.search(text, start)
+    end = first_section.start() if first_section else len(text)
+    return text[start:end].strip("\n")
+
+
+def _decision_status(item: dict[str, Any]) -> str:
+    body = ((item.get("metadata") or {}).get("body_md") or "").strip("\n")
+    status_match = re.match(r"\*\*Status:\*\*\s*([^\n]+)", body)
+    if status_match:
+        return status_match.group(1).strip()
+    status = item.get("status") or "proposed"
+    return status.capitalize() if isinstance(status, str) and status.islower() else str(status)
+
+
+def _sync_decision_summary(prefix: str, decisions: list[dict[str, Any]]) -> str:
+    """Keep a Markdown decision summary table consistent with structured decision items."""
+    lines = prefix.splitlines()
+    table_rows: dict[str, int] = {}
+    separator_index: int | None = None
+    last_row_index: int | None = None
+    for index, line in enumerate(lines):
+        cells = [cell.strip() for cell in line.split("|")[1:-1]]
+        if len(cells) < 3:
+            continue
+        if set(cells[0]) <= {"-", ":"}:
+            separator_index = index
+            continue
+        if cells[0].lower() == "id":
+            continue
+        table_rows[cells[0].lower()] = index
+        last_row_index = index
+
+    if separator_index is None:
+        return prefix
+
+    missing: list[str] = []
+    for decision in decisions:
+        metadata = decision.get("metadata") or {}
+        decision_id = str(metadata.get("decision_id") or "")
+        row_index = table_rows.get(decision_id.lower())
+        if row_index is None:
+            title = decision["title"].split(":", 1)[1].strip() if ":" in decision["title"] else decision["title"]
+            missing.append(f"| {decision_id} | {title} | {_decision_status(decision)} |")
+            continue
+        cells = [cell.strip() for cell in lines[row_index].split("|")[1:-1]]
+        cells[2] = _decision_status(decision)
+        lines[row_index] = "| " + " | ".join(cells) + " |"
+
+    if missing:
+        insert_at = (last_row_index if last_row_index is not None else separator_index) + 1
+        lines[insert_at:insert_at] = missing
+    return "\n".join(lines)
 
 
 def parse_sad_sections(text: str) -> list[dict[str, Any]]:

@@ -1,3 +1,8 @@
+# ArchitecturalKnowledgeDB - Software Architecture (arc42)
+
+**Tool:** `ArchitecturalKnowledgeDB` - **Repository:** `ArchitecturalKnowledgeDB` - **Kind:** outer tool (non-Unreal)
+**Last reconciled to code:** `2026-07-01`
+
 ## 1. Introduction & Goals
 
 ArchitecturalKnowledgeDB (AKDB) is a standalone Python architecture knowledge database for ADRs,
@@ -253,28 +258,15 @@ can fail while serializing Unicode tool descriptions or architecture content.
 
 ## 9. Architecture Decisions
 
-### D-DB: SQLite default, PostgreSQL opt-in via a Database facade
-
-**Status:** Proposed
-
-AKDB's default embedded backend is SQLite (local-first, zero-setup). PostgreSQL is an opt-in
-backend selected by the AKDB_DB_URL environment variable, for concurrent multi-writer / server
-deployments. All code talks to a Database facade (db/database.py) that duck-types the
-sqlite3.Connection surface; backend divergence is confined to five files (database, connection,
-migrations + schema/pg, search, import_export). Timestamps stay TEXT on PostgreSQL v1; pgvector
-and connection pooling are deferred.
-
-### D-SOR: AKDB is the system of record for its own architecture
-
-**Status:** Accepted
-
-AKDB's architecture is authored and maintained in the AKDB database, not in hand-written
-markdown. The docs/architecture folder is a deterministic arc42 export (export_sad) of the
-database and is never hand-edited. Two usage contexts each have their own knowledge base and
-export target: AKDB documents itself into ArchitecturalKnowledgeDB/docs, while the Tiny Tool
-Development platform exports to D:\TinyToolDevelopment\AKDB\export. Hand-authored architecture
-folders are retired only after their content is captured in the database and the export
-reproduces the equivalent.
+| ID | Title | Status |
+| --- | --- | --- |
+| D1 | Active Outer Tool classification | Accepted |
+| D2 | Source files remain normative, AKDB is an index/context service | Accepted |
+| D3 | CLI/API/MCP share one local knowledge service | Accepted |
+| D4 | Read-only repository and Git provenance by default | Accepted |
+| D5 | Website features AKDB as an Outer Tool projection, not a source authority | Accepted |
+| D-DB | SQLite default, PostgreSQL opt-in via a Database facade | Accepted |
+| D-SoR | AKDB is the system of record for its own architecture | Accepted |
 
 ### D1: Active Outer Tool Classification
 
@@ -336,6 +328,29 @@ source files remain authoritative" boundary visible.
 **Consequences.** Public presentation becomes useful and accurate, deploy builds list AKDB without
 requiring the internal `Git` repository, and documentation drift is checked through website tests and
 future SAD/product-facts updates.
+
+### D-DB: SQLite default, PostgreSQL opt-in via a Database facade
+
+**Status:** Accepted
+
+AKDB's default embedded backend is SQLite (local-first, zero-setup). PostgreSQL is an opt-in
+backend selected by the AKDB_DB_URL environment variable, for concurrent multi-writer / server
+deployments. All code talks to a Database facade (db/database.py) that duck-types the
+sqlite3.Connection surface; backend divergence is confined to five files (database, connection,
+migrations + schema/pg, search, import_export). Timestamps stay TEXT on PostgreSQL v1; pgvector
+and connection pooling are deferred.
+
+### D-SoR: AKDB is the system of record for its own architecture
+
+**Status:** Accepted
+
+AKDB's architecture is authored and maintained in the AKDB database, not in hand-written
+markdown. The docs/architecture folder is a deterministic arc42 export (export_sad) of the
+database and is never hand-edited. Two usage contexts each have their own knowledge base and
+export target: AKDB documents itself into ArchitecturalKnowledgeDB/docs, while the Tiny Tool
+Development platform exports to D:\TinyToolDevelopment\AKDB\export. Hand-authored architecture
+folders are retired only after their content is captured in the database and the export
+reproduces the equivalent.
 
 ## 10. Quality Requirements
 

@@ -42,3 +42,8 @@ def test_sad_import_stores_sections(conn, tmp_path: Path) -> None:
     intro = next(s for s in sections if s["title"] == "1. Introduction")
     assert (intro["metadata"] or {}).get("order") == 0
     assert "Intro prose." in (intro["metadata"] or {})["body_md"]
+    preambles = ImportExportService(conn).knowledge.list_items(
+        "p", include_types=["sad_preamble"], include_shared=False, limit=50
+    )
+    assert len(preambles) == 1
+    assert (preambles[0]["metadata"] or {})["body_md"] == "# Sample SAD"
