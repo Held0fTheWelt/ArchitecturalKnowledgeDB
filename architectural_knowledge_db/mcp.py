@@ -302,6 +302,19 @@ MCP_MANIFEST: dict[str, Any] = {
             },
         },
         {
+            "name": "akdb_export_sad",
+            "description": "Export a project's arc42 architecture.md + UML from the database.",
+            "input_schema": {
+                "type": "object",
+                "required": ["project_id", "folder"],
+                "properties": {
+                    "project_id": {"type": "string"},
+                    "folder": {"type": "string"},
+                    "document_local_id": {"type": "string"},
+                },
+            },
+        },
+        {
             "name": "akdb_list_diagrams",
             "description": "List UML diagrams for a project.",
             "input_schema": {
@@ -964,6 +977,12 @@ class McpDispatcher:
             return ImportExportService(self.conn).import_adrs(arguments["project_id"], arguments["folder"])
         if tool_name == "akdb_export_adrs":
             return ImportExportService(self.conn).export_adrs(arguments["project_id"], arguments["folder"])
+        if tool_name == "akdb_export_sad":
+            return ImportExportService(self.conn).export_sad(
+                arguments["project_id"],
+                arguments["folder"],
+                arguments.get("document_local_id"),
+            )
         if tool_name == "akdb_list_diagrams":
             return UMLService(self.conn).list_diagrams(
                 arguments["project_id"],

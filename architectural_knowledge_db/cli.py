@@ -45,6 +45,7 @@ app = typer.Typer(help="ArchitecturalKnowledgeDB local service CLI.")
 project_app = typer.Typer(help="Manage projects and shared spaces.")
 repo_app = typer.Typer(help="Manage source repositories.")
 adr_app = typer.Typer(help="Import, export, and inspect ADRs.")
+sad_app = typer.Typer(help="Export arc42 Software Architecture Documents.")
 rule_app = typer.Typer(help="Manage architecture rules.")
 definition_app = typer.Typer(help="Manage definitions.")
 source_area_app = typer.Typer(help="Manage source areas.")
@@ -59,6 +60,7 @@ consistency_app = typer.Typer(help="Run consistency checks and inspect links.")
 app.add_typer(project_app, name="project")
 app.add_typer(repo_app, name="repo")
 app.add_typer(adr_app, name="adr")
+app.add_typer(sad_app, name="sad")
 app.add_typer(rule_app, name="rule")
 app.add_typer(definition_app, name="definition")
 app.add_typer(source_area_app, name="source-area")
@@ -282,6 +284,16 @@ def export_adrs(
 ) -> None:
     with _conn() as conn:
         _print(ImportExportService(conn).export_adrs(project_id, folder))
+
+
+@sad_app.command("export")
+def export_sad(
+    project_id: str = typer.Option(..., "--project"),
+    folder: Path = typer.Option(..., "--folder"),
+    document_local_id: str | None = typer.Option(None, "--document"),
+) -> None:
+    with _conn() as conn:
+        _print(ImportExportService(conn).export_sad(project_id, folder, document_local_id))
 
 
 @adr_app.command("list")
