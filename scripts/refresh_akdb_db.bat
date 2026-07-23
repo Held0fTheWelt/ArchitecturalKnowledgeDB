@@ -9,14 +9,14 @@ REM    refresh_akdb_db.bat apply      -> swap in the default canonical DB
 REM    refresh_akdb_db.bat apply PATH -> swap in PATH as the live DB
 REM
 REM  Runnable by double-click, or from WSL via interop:
-REM    cmd.exe /c "D:\TinyToolDevelopment\Tools\ArchitecturalKnowledgeDB\scripts\refresh_akdb_db.bat" apply
+REM    cmd.exe /c "D:\TinyToolDevelopment\ArchitecturalKnowledgeDB\scripts\refresh_akdb_db.bat" apply
 REM
 REM  After "apply", restart the MCP clients so their stdio servers reopen the DB.
 REM  Single writer: the live DB cannot be overwritten while a client still holds
 REM  it open; if the copy fails, close MCP clients and re-run.
 REM ===========================================================================
 
-set "REPO=D:\TinyToolDevelopment\Tools\ArchitecturalKnowledgeDB"
+set "REPO=D:\TinyToolDevelopment\ArchitecturalKnowledgeDB"
 set "PY=C:\Users\YvesT\AppData\Local\Programs\Python\Python314\python.exe"
 set "LIVE=%REPO%\.akdb\architectural_knowledge_db.sqlite"
 set "PORT=8787"

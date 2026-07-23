@@ -10,7 +10,7 @@ that may occur in tool descriptions or architecture content.
 
 | Variable | Purpose | Windows example | WSL example |
 | --- | --- | --- | --- |
-| `AKDB_DATABASE_PATH` | SQLite file to serve | `D:\TinyToolDevelopment\Tools\ArchitecturalKnowledgeDB\.akdb\architectural_knowledge_db.sqlite` | `/mnt/d/TinyToolDevelopment/Tools/ArchitecturalKnowledgeDB/.akdb/architectural_knowledge_db.sqlite` |
+| `AKDB_DATABASE_PATH` | SQLite file to serve | `D:\TinyToolDevelopment\ArchitecturalKnowledgeDB\.akdb\architectural_knowledge_db.sqlite` | `/mnt/d/TinyToolDevelopment/ArchitecturalKnowledgeDB/.akdb/architectural_knowledge_db.sqlite` |
 | `AKDB_SOURCE_ROOT` | Resolves `/sources/...` registry paths | `D:\TinyToolDevelopment` | `/mnt/d/TinyToolDevelopment` |
 | `AKDB_DEFAULT_PROJECT` | Project used when a tool call omits `project_id` | `tiny-tool-development` | `tiny-tool-development` |
 
@@ -23,8 +23,8 @@ that may occur in tool descriptions or architecture content.
       "command": "/usr/bin/python3",
       "args": ["-m", "architectural_knowledge_db.mcp_stdio"],
       "env": {
-        "PYTHONPATH": "/mnt/d/TinyToolDevelopment/Tools/ArchitecturalKnowledgeDB",
-        "AKDB_DATABASE_PATH": "/mnt/d/TinyToolDevelopment/Tools/ArchitecturalKnowledgeDB/.akdb/architectural_knowledge_db.sqlite",
+        "PYTHONPATH": "/mnt/d/TinyToolDevelopment/ArchitecturalKnowledgeDB",
+        "AKDB_DATABASE_PATH": "/mnt/d/TinyToolDevelopment/ArchitecturalKnowledgeDB/.akdb/architectural_knowledge_db.sqlite",
         "AKDB_SOURCE_ROOT": "/mnt/d/TinyToolDevelopment",
         "AKDB_DEFAULT_PROJECT": "tiny-tool-development"
       }
