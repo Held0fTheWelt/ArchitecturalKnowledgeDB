@@ -335,7 +335,17 @@ class ImportExportService:
             if not path.is_file():
                 continue
             source_key = path.relative_to(root).as_posix()
-            if not _matches_any(source_key, include_patterns) or _matches_any(source_key, exclude_patterns):
+            if include_patterns == ["**/*"]:
+                # Explicit "every file" include: fnmatch's "**/*" requires a literal
+                # "/" (glob-style ** is not special to fnmatch), so top-level files
+                # like "START-HERE.md" would otherwise be silently skipped. An
+                # explicit "**/*" means "every file" — bypass the suffix allowlist
+                # entirely rather than trying to out-glob fnmatch. Default behavior
+                # (DEFAULT_DOCUMENT_PATTERNS) is unchanged.
+                matched = not _matches_any(source_key, exclude_patterns)
+            else:
+                matched = _matches_any(source_key, include_patterns) and not _matches_any(source_key, exclude_patterns)
+            if not matched:
                 continue
             text = _read_text_exact(path)
             document = parse_document_file(path, text, source_uri=str(path), source_key=source_key)
@@ -460,6 +470,86 @@ class ImportExportService:
             _write_text_exact(target, body_text)
             exported.append(target.relative_to(root).as_posix())
         return {"project_id": project_id, "folder": str(root), "exported": len(exported), "files": exported}
+
+    def export_canon(self, project_id: str, folder: str | Path, *, clean: bool = True) -> dict[str, Any]:
+        """Reproduce the canon at its original repo paths (byte-faithful whole-tree mirror)."""
+        root = Path(folder)
+        root.mkdir(parents=True, exist_ok=True)
+        if clean:
+            _clean_export_root(root)
+        items = self.knowledge.list_items(project_id, include_shared=False, limit=100000)
+        exported: list[str] = []
+        for item in sorted(items, key=lambda it: (it.get("metadata") or {}).get("repo_source_key") or ""):
+            metadata = item.get("metadata") or {}
+            repo_key = metadata.get("repo_source_key")
+            body_text = metadata.get("body_text")
+            if not repo_key or body_text is None:
+                continue
+            target = _target_for_source_key(root, repo_key, f"{item['local_id']}.md")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            _write_text_exact(target, body_text)
+            exported.append(target.relative_to(root).as_posix())
+        self._write_canon_export_manifest(root, project_id, exported)
+        return {"project_id": project_id, "folder": str(root), "exported": len(exported), "files": exported}
+
+    def _write_canon_export_manifest(self, root: Path, project_id: str, files: list[str]) -> None:
+        manifest = {"files": sorted(files), "format_version": 1, "project_id": project_id}
+        (root / ".akdb-canon-export.json").write_text(
+            json.dumps(manifest, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+
+    def verify_canon(
+        self,
+        project_id: str,
+        live_root: str | Path,
+        *,
+        exclude: tuple[str, ...] = ("**/product-facts.yml", "**/product-facts.yaml"),
+    ) -> dict[str, Any]:
+        """Byte-diff a fresh canon export against the live repo tree (class-H excluded)."""
+        import fnmatch
+        import tempfile
+
+        live = Path(live_root)
+
+        def _excluded(rel: str) -> bool:
+            return any(fnmatch.fnmatch(rel, pat) for pat in exclude)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fresh = Path(tmp) / "export"
+            self.export_canon(project_id, fresh)
+            fresh_files = {
+                p.relative_to(fresh).as_posix(): p
+                for p in fresh.rglob("*")
+                if p.is_file() and p.name != ".akdb-canon-export.json"
+            }
+            live_files = {
+                p.relative_to(live).as_posix(): p
+                for p in live.rglob("*")
+                if p.is_file()
+                and (p.relative_to(live).as_posix().startswith("docs/architecture/")
+                     or p.relative_to(live).as_posix().startswith("UML/"))
+                and not _excluded(p.relative_to(live).as_posix())
+            }
+            matched = 0
+            mismatched: list[str] = []
+            for rel, fresh_path in sorted(fresh_files.items()):
+                live_path = live / rel
+                if live_path.is_file() and live_path.read_bytes() == fresh_path.read_bytes():
+                    matched += 1
+                else:
+                    mismatched.append(rel)
+            missing = sorted(set(live_files) - set(fresh_files))
+            extra = sorted(set(fresh_files) - set(live_files))
+        return {
+            "project_id": project_id,
+            "live_root": str(live),
+            "matched": matched,
+            "mismatched": mismatched,
+            "missing": missing,
+            "extra": extra,
+        }
 
     def export_links(self, project_id: str, folder: str | Path) -> dict[str, Any]:
         root = Path(folder)
