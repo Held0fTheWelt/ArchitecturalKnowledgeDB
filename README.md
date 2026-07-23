@@ -2,7 +2,9 @@
 
 ArchitecturalKnowledgeDB (AKDB) is a local architecture knowledge database for projects that need searchable decisions, diagrams, rules, definitions, source-area notes, and read-only Git provenance. It gives humans and coding agents a project-aware context layer without turning the source repository itself into a database.
 
-AKDB is a standalone Python tool. It is not an Unreal plugin, not a Fab package, and not the storage location for Tiny Tools SAD/UML material.
+AKDB is a standalone Python tool. It is not an Unreal plugin, not a Fab package, and not the
+storage location for the **Tiny Tool Development platform** SAD/UML material. It **does** hold
+and generate **its own** architecture self-mirror under `docs/architecture`.
 
 ## What Is In This Repository
 
@@ -84,6 +86,21 @@ Choose SQLite for single-user, local, or embedded runs. Choose PostgreSQL when m
 
 Operations details: [docs/operations/postgres.md](docs/operations/postgres.md).
 
+## Self-documentation
+
+`docs/architecture` (the arc42 `architecture.md` + `UML/` tree for AKDB itself) is
+**generated from the AKDB database — do not hand-edit**. Regenerate with:
+
+```powershell
+python -m architectural_knowledge_db.cli sad export --project architectural-knowledge-db --folder docs/architecture
+```
+
+Supporting notes that are not part of that export (for example
+[docs/architecture/dual-backend.md](docs/architecture/dual-backend.md)) may still be maintained
+as ordinary docs. The hand-authored SAD under `Git/docs/architecture/plugins/ArchitecturalKnowledgeDB`
+is a Phase 4 residual until export equivalence is proven; see
+[docs/INTERNAL_DOCS_RELOCATED.md](docs/INTERNAL_DOCS_RELOCATED.md).
+
 ## Documentation Map
 
 Start here:
@@ -96,13 +113,15 @@ Start here:
 - [FAQ](docs/user/FAQ.md)
 - [MCP Access](docs/operations/MCP.md)
 - [PostgreSQL (opt-in)](docs/operations/postgres.md)
+- [Generated architecture mirror](docs/architecture/architecture.md)
 - [Dual-backend architecture](docs/architecture/dual-backend.md)
 - [Architecture decisions](docs/adr/README.md)
 - [Internal docs relocation note](docs/INTERNAL_DOCS_RELOCATED.md)
 
-Public AKDB-specific architecture and decisions belong in this repository. Private planning,
-cross-project SAD/UML, contracts, generated exports, and the maintainer runbook remain outside
-it (see `INTERNAL_DOCS_RELOCATED.md`).
+Public AKDB-specific architecture and decisions belong in this repository (database-backed
+self-mirror under `docs/architecture`). Private planning, platform SAD/UML, contracts,
+generated exports for other projects, and the maintainer runbook remain outside it (see
+`INTERNAL_DOCS_RELOCATED.md`).
 
 ## Repository Boundary
 

@@ -2,9 +2,10 @@
 
 This folder documents how to run, use, operate, and understand ArchitecturalKnowledgeDB.
 
-Public AKDB-specific architecture and decisions live here. Private planning, cross-project
-SAD/UML, contracts, generated exports, and the maintainer runbook remain outside this
-repository. See [INTERNAL_DOCS_RELOCATED.md](INTERNAL_DOCS_RELOCATED.md).
+Public AKDB-specific architecture and decisions live here (including the generated
+`architecture/` self-mirror). Private planning, platform SAD/UML, contracts, generated
+exports for other projects, and the maintainer runbook remain outside this repository.
+See [INTERNAL_DOCS_RELOCATED.md](INTERNAL_DOCS_RELOCATED.md).
 
 ## Where To Start
 
@@ -27,7 +28,7 @@ repository. See [INTERNAL_DOCS_RELOCATED.md](INTERNAL_DOCS_RELOCATED.md).
 | --- | --- |
 | `user/` | Practical user documentation: quick start, manual, settings, troubleshooting, FAQ, third-party notes. |
 | `operations/` | MCP setup, PostgreSQL opt-in ops, and public operations notes. |
-| `architecture/` | Public AKDB component and backend architecture. |
+| `architecture/` | Generated arc42 self-mirror (`architecture.md` + `UML/`) plus supporting notes (e.g. dual-backend). Do not hand-edit the mirror; re-export from the database. |
 | `adr/` | Public decisions governing AKDB itself. |
 | `examples/` | Registry, compose, and standalone sample inputs. |
 
