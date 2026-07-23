@@ -69,6 +69,21 @@ python -m architectural_knowledge_db.cli mcp manifest
 
 Use `AKDB_DATABASE_PATH` or the global `--db` option to choose a database file.
 
+## Storage backends
+
+SQLite is the default backend. Nothing extra to install or configure: data lives at `.akdb/architectural_knowledge_db.sqlite` (override with `AKDB_DATABASE_PATH` or `--db`).
+
+PostgreSQL is an opt-in choice for concurrent or multi-writer use. Install the optional extra and set a DSN:
+
+```bash
+pip install ".[postgres]"
+export AKDB_DB_URL=postgresql://user:pass@host:5432/akdb
+```
+
+Choose SQLite for single-user, local, or embedded runs. Choose PostgreSQL when multiple processes (API + CLI + MCP) or multiple agents write concurrently — PostgreSQL MVCC avoids SQLite’s single-writer `database is locked` failures.
+
+Operations details: [docs/operations/postgres.md](docs/operations/postgres.md).
+
 ## Documentation Map
 
 Start here:
