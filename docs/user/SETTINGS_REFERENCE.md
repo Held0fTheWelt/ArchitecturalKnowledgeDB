@@ -21,7 +21,8 @@ akdb serve --host 127.0.0.1 --port 8787
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `AKDB_DATA_ROOT` | `.akdb` | Runtime data directory used when `AKDB_DATABASE_PATH` is not set. |
-| `AKDB_DATABASE_PATH` | `.akdb\architectural_knowledge_db.sqlite` | SQLite database file. |
+| `AKDB_DATABASE_PATH` | `.akdb\architectural_knowledge_db.sqlite` | SQLite database file (ignored when `AKDB_DB_URL` is set). |
+| `AKDB_DB_URL` | unset | Optional PostgreSQL DSN (`postgresql://...`). When set, selects the opt-in PostgreSQL backend; see [operations/postgres.md](../operations/postgres.md). |
 | `AKDB_HOST` | `127.0.0.1` | Default service host for environment-based settings. |
 | `AKDB_PORT` | `8787` | Default service port for environment-based settings. |
 | `AKDB_SOURCE_ROOT` | unset | Resolves portable `/sources/...` registry paths. |

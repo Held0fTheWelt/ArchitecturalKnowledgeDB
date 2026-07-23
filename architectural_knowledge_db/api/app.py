@@ -47,7 +47,7 @@ _migrated_database_paths: set[str] = set()
 def create_app() -> FastAPI:
     app = FastAPI(
         title="ArchitecturalKnowledgeDB Knowledge DB API",
-        version="0.1.1",
+        version="0.2.0",
         description="Multi-project DB-first architecture knowledge service with linked Git provenance.",
     )
     database_path = Settings.from_env().database_path

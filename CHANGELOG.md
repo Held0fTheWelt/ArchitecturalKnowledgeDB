@@ -1,5 +1,14 @@
 # ArchitecturalKnowledgeDB Changelog
 
+## [0.2.0] - 2026-07-23
+
+### Added
+- Optional PostgreSQL backend via `AKDB_DB_URL` (install `.[postgres]`). SQLite remains the default, zero-setup local-first backend.
+
+### Changed
+- Hardened SQLite connections with `busy_timeout` and `synchronous` settings on every connection.
+- API runs migrations once at startup instead of per request.
+
 ## [0.1.1] - 2026-07-19
 
 ### Fixed
