@@ -47,33 +47,45 @@ class ImportExportService:
             raise ValueError(f"ADR folder does not exist: {root}")
         imported = []
         skipped = []
-        for path in sorted(root.rglob("*.md")):
-            source_key = path.relative_to(root).as_posix()
-            text = _read_text_exact(path)
-            if is_template_or_readme_adr(path, source_key, text):
-                skipped.append(source_key)
-                continue
-            adr = parse_adr_markdown(
-                text,
-                source_uri=str(path),
-                source_key=source_key,
-            )
-            adr.metadata.update(
-                {
-                    "source_key": source_key,
-                    "repo_source_key": repo_relative_key(path),
-                }
-            )
-            item = self.knowledge.upsert_adr(project_id, adr)
-            self._link_targets(
-                project_id,
-                item["item_uid"],
-                [
-                    *_markdown_link_targets(text, path),
-                ],
-                evidence=f"ADR import {source_key}",
-            )
-            imported.append(item)
+        from architectural_knowledge_db.services.export_flush import deferred_export
+
+        with deferred_export(self.conn):
+            for path in sorted(root.rglob("*.md")):
+                source_key = path.relative_to(root).as_posix()
+                text = _read_text_exact(path)
+                if is_template_or_readme_adr(path, source_key, text):
+                    skipped.append(source_key)
+                    continue
+                adr = parse_adr_markdown(
+                    text,
+                    source_uri=str(path),
+                    source_key=source_key,
+                )
+                adr.metadata.update(
+                    {
+                        "source_key": source_key,
+                        "repo_source_key": repo_relative_key(path),
+                        # Verbatim bytes alongside the structured decomposition
+                        # (context_md/decision_md/...) so ADRs flow through the
+                        # SAME generic byte-exact export path as SAD/documents
+                        # (list_items()-based export_canon/_mirror_path never
+                        # join the `adrs.raw_source` column). Real gap found
+                        # 2026-07-24: without this, ADRs were silently invisible
+                        # to export_canon()/verify_canon() -- see progress.md.
+                        "body_text": text,
+                        "body_encoding": "utf-8",
+                    }
+                )
+                item = self.knowledge.upsert_adr(project_id, adr)
+                self._link_targets(
+                    project_id,
+                    item["item_uid"],
+                    [
+                        *_markdown_link_targets(text, path),
+                    ],
+                    evidence=f"ADR import {source_key}",
+                )
+                imported.append(item)
         return self._with_auto_export(project_id, {
             "project_id": project_id,
             "folder": str(root),
@@ -358,69 +370,72 @@ class ImportExportService:
         # body_text. _seen_local_ids_for_project() seeds this from the live DB
         # so it also catches collisions against an EARLIER, separate call.
         seen_local_ids = self._seen_local_ids_for_project(project_id)
-        for path in sorted(root.rglob("*")):
-            if not path.is_file():
-                continue
-            source_key = path.relative_to(root).as_posix()
-            if include_patterns == ["**/*"]:
-                # Explicit "every file" include: fnmatch's "**/*" requires a literal
-                # "/" (glob-style ** is not special to fnmatch), so top-level files
-                # like "START-HERE.md" would otherwise be silently skipped. An
-                # explicit "**/*" means "every file" — bypass the suffix allowlist
-                # entirely rather than trying to out-glob fnmatch. Default behavior
-                # (DEFAULT_DOCUMENT_PATTERNS) is unchanged.
-                matched = not _matches_any(source_key, exclude_patterns)
-            else:
-                matched = _matches_any(source_key, include_patterns) and not _matches_any(source_key, exclude_patterns)
-            if not matched:
-                continue
-            text, encoding = _read_text_exact_any_encoding(path)
-            document = parse_document_file(path, text, source_uri=str(path), source_key=source_key)
-            classification = classify_document(source_key, path, document)
-            local_id = document["document_id"]
-            repo_key = repo_relative_key(path)
-            collision_key = (classification["item_type"], local_id)
-            previous_repo_key = seen_local_ids.get(collision_key)
-            if previous_repo_key is not None and previous_repo_key != repo_key:
-                suffix = path.suffix.lstrip(".").lower() or "file"
-                local_id = f"{local_id}--{suffix}"
+        from architectural_knowledge_db.services.export_flush import deferred_export
+
+        with deferred_export(self.conn):
+            for path in sorted(root.rglob("*")):
+                if not path.is_file():
+                    continue
+                source_key = path.relative_to(root).as_posix()
+                if include_patterns == ["**/*"]:
+                    # Explicit "every file" include: fnmatch's "**/*" requires a literal
+                    # "/" (glob-style ** is not special to fnmatch), so top-level files
+                    # like "START-HERE.md" would otherwise be silently skipped. An
+                    # explicit "**/*" means "every file" — bypass the suffix allowlist
+                    # entirely rather than trying to out-glob fnmatch. Default behavior
+                    # (DEFAULT_DOCUMENT_PATTERNS) is unchanged.
+                    matched = not _matches_any(source_key, exclude_patterns)
+                else:
+                    matched = _matches_any(source_key, include_patterns) and not _matches_any(source_key, exclude_patterns)
+                if not matched:
+                    continue
+                text, encoding = _read_text_exact_any_encoding(path)
+                document = parse_document_file(path, text, source_uri=str(path), source_key=source_key)
+                classification = classify_document(source_key, path, document)
+                local_id = document["document_id"]
+                repo_key = repo_relative_key(path)
                 collision_key = (classification["item_type"], local_id)
                 previous_repo_key = seen_local_ids.get(collision_key)
                 if previous_repo_key is not None and previous_repo_key != repo_key:
-                    # Same-suffix collision (e.g. two different trees' README.md):
-                    # the suffix alone can't disambiguate -- fall back to the
-                    # top-level repo tree segment (e.g. "docs" vs "uml").
-                    tree_segment = repo_key.split("/", 1)[0].lower() or "root"
-                    local_id = f"{local_id}--{tree_segment}"
+                    suffix = path.suffix.lstrip(".").lower() or "file"
+                    local_id = f"{local_id}--{suffix}"
                     collision_key = (classification["item_type"], local_id)
-            seen_local_ids[collision_key] = repo_key
-            metadata = {
-                **document.get("metadata", {}),
-                "source_key": document["source_key"],
-                "repo_source_key": repo_key,
-                "format": document["format"],
-                "doc_kind": classification["doc_kind"],
-                "body_text": text,
-                "body_encoding": encoding,
-                "headings": document.get("headings", []),
-            }
-            item_uid = self.knowledge._upsert_item(
-                project_id=project_id,
-                space_id=None,
-                item_type=classification["item_type"],
-                local_id=local_id,
-                title=document["title"],
-                status=classification["status"],
-                authority_level=classification["authority_level"],
-                summary=document["summary"],
-                source_uri=document["source_uri"],
-                metadata=metadata,
-            )
-            self.knowledge._index_item(item_uid)
-            item = self.knowledge.get_item_by_uid(item_uid)
-            self._link_document(item, path, root, text, document)
-            imported.append(item)
-            derived.extend(self._import_derived_architecture_records(project_id, item, path, root, text, document))
+                    previous_repo_key = seen_local_ids.get(collision_key)
+                    if previous_repo_key is not None and previous_repo_key != repo_key:
+                        # Same-suffix collision (e.g. two different trees' README.md):
+                        # the suffix alone can't disambiguate -- fall back to the
+                        # top-level repo tree segment (e.g. "docs" vs "uml").
+                        tree_segment = repo_key.split("/", 1)[0].lower() or "root"
+                        local_id = f"{local_id}--{tree_segment}"
+                        collision_key = (classification["item_type"], local_id)
+                seen_local_ids[collision_key] = repo_key
+                metadata = {
+                    **document.get("metadata", {}),
+                    "source_key": document["source_key"],
+                    "repo_source_key": repo_key,
+                    "format": document["format"],
+                    "doc_kind": classification["doc_kind"],
+                    "body_text": text,
+                    "body_encoding": encoding,
+                    "headings": document.get("headings", []),
+                }
+                item_uid = self.knowledge._upsert_item(
+                    project_id=project_id,
+                    space_id=None,
+                    item_type=classification["item_type"],
+                    local_id=local_id,
+                    title=document["title"],
+                    status=classification["status"],
+                    authority_level=classification["authority_level"],
+                    summary=document["summary"],
+                    source_uri=document["source_uri"],
+                    metadata=metadata,
+                )
+                self.knowledge._index_item(item_uid)
+                item = self.knowledge.get_item_by_uid(item_uid)
+                self._link_document(item, path, root, text, document)
+                imported.append(item)
+                derived.extend(self._import_derived_architecture_records(project_id, item, path, root, text, document))
         return self._with_auto_export(project_id, {
             "project_id": project_id,
             "folder": str(root),
