@@ -347,7 +347,7 @@ class ImportExportService:
                 matched = _matches_any(source_key, include_patterns) and not _matches_any(source_key, exclude_patterns)
             if not matched:
                 continue
-            text = _read_text_exact(path)
+            text, encoding = _read_text_exact_any_encoding(path)
             document = parse_document_file(path, text, source_uri=str(path), source_key=source_key)
             classification = classify_document(source_key, path, document)
             local_id = document["document_id"]
@@ -365,6 +365,7 @@ class ImportExportService:
                 "format": document["format"],
                 "doc_kind": classification["doc_kind"],
                 "body_text": text,
+                "body_encoding": encoding,
                 "headings": document.get("headings", []),
             }
             item_uid = self.knowledge._upsert_item(
@@ -487,7 +488,7 @@ class ImportExportService:
                 continue
             target = _target_for_source_key(root, repo_key, f"{item['local_id']}.md")
             target.parent.mkdir(parents=True, exist_ok=True)
-            _write_text_exact(target, body_text)
+            _write_text_exact_with_encoding(target, body_text, metadata.get("body_encoding", "utf-8"))
             exported.append(target.relative_to(root).as_posix())
         self._write_canon_export_manifest(root, project_id, exported)
         return {"project_id": project_id, "folder": str(root), "exported": len(exported), "files": exported}
@@ -1541,6 +1542,45 @@ def _read_text_exact(path: Path) -> str:
 def _write_text_exact(path: Path, text: str) -> None:
     with path.open("w", encoding="utf-8", newline="") as handle:
         handle.write(text)
+
+
+# BOM-prefixed encodings found in the real canon (e.g. Windows PowerShell
+# `> file.log` redirection emits UTF-16 LE). Kept as explicit byte prefixes
+# (rather than relying on the "utf-16"/"utf-8-sig" codecs' own BOM-on-encode
+# behavior, which is native-byte-order-dependent) so decode -> encode is a
+# deterministic, byte-exact round trip regardless of host architecture.
+_UTF16_LE_BOM = b"\xff\xfe"
+_UTF16_BE_BOM = b"\xfe\xff"
+_UTF8_BOM = b"\xef\xbb\xbf"
+
+
+def _decode_text_exact(raw: bytes) -> tuple[str, str]:
+    """Decode raw file bytes, returning (text, encoding) for an exact re-encode later."""
+    if raw.startswith(_UTF16_LE_BOM):
+        return raw[len(_UTF16_LE_BOM):].decode("utf-16-le"), "utf-16-le-bom"
+    if raw.startswith(_UTF16_BE_BOM):
+        return raw[len(_UTF16_BE_BOM):].decode("utf-16-be"), "utf-16-be-bom"
+    if raw.startswith(_UTF8_BOM):
+        return raw[len(_UTF8_BOM):].decode("utf-8"), "utf-8-sig"
+    return raw.decode("utf-8"), "utf-8"
+
+
+def _read_text_exact_any_encoding(path: Path) -> tuple[str, str]:
+    """Like _read_text_exact, but detects non-UTF-8 canon files instead of raising."""
+    return _decode_text_exact(path.read_bytes())
+
+
+def _write_text_exact_with_encoding(path: Path, text: str, encoding: str) -> None:
+    """Write text back using the exact encoding+BOM it was ingested with."""
+    if encoding == "utf-16-le-bom":
+        payload = _UTF16_LE_BOM + text.encode("utf-16-le")
+    elif encoding == "utf-16-be-bom":
+        payload = _UTF16_BE_BOM + text.encode("utf-16-be")
+    elif encoding == "utf-8-sig":
+        payload = _UTF8_BOM + text.encode("utf-8")
+    else:
+        payload = text.encode("utf-8")
+    path.write_bytes(payload)
 
 
 def _target_for_source_key(root: Path, source_key: Any, fallback: str) -> Path:

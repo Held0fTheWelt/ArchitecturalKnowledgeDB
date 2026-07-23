@@ -49,3 +49,33 @@ def test_export_canon_reproduces_repo_tree_byte_for_byte(conn, tmp_path):
         assert target.read_text(encoding="utf-8") == text, f"bytes drift for {rel}"
     manifest = out / ".akdb-canon-export.json"
     assert manifest.is_file()
+
+
+def test_export_canon_preserves_non_utf8_encodings_byte_exact(conn, tmp_path):
+    # Real canon gap found in Phase 4 (2026-07-23): a captured build log
+    # (docs/architecture/evidence/2026-07-02-apm-build.log) is UTF-16 LE with a
+    # BOM (a common artifact of Windows PowerShell `> file.log` redirection).
+    # import_documents() must not crash on non-UTF-8 text, and export_canon()
+    # must reproduce the exact original bytes (encoding + BOM), not re-encode
+    # as UTF-8 -- verify_canon() byte-diffs raw bytes, so any transcoding would
+    # be a permanent, undetected drift the moment this file is ingested.
+    src = tmp_path / "repo"
+    src.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q"], cwd=src, check=True)
+    target = src / "docs" / "architecture" / "evidence" / "build.log"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    original_bytes = b"\xff\xfe" + "2026-01-01 boot ok\r\n".encode("utf-16-le")
+    target.write_bytes(original_bytes)
+
+    ProjectService(conn).upsert_project(
+        ProjectUpsert(project_id="canon-enc", display_name="Canon Enc")
+    )
+    svc = ImportExportService(conn)
+    svc.import_documents("canon-enc", src / "docs" / "architecture", include=["**/*"])
+
+    out = tmp_path / "export"
+    svc.export_canon("canon-enc", out)
+
+    exported = out / "docs" / "architecture" / "evidence" / "build.log"
+    assert exported.is_file(), "missing docs/architecture/evidence/build.log"
+    assert exported.read_bytes() == original_bytes, "UTF-16 bytes drifted on export"
