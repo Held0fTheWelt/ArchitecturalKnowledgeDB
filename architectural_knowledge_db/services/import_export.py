@@ -472,8 +472,26 @@ class ImportExportService:
             exported.append(target.relative_to(root).as_posix())
         return {"project_id": project_id, "folder": str(root), "exported": len(exported), "files": exported}
 
-    def export_canon(self, project_id: str, folder: str | Path, *, clean: bool = True) -> dict[str, Any]:
-        """Reproduce the canon at its original repo paths (byte-faithful whole-tree mirror)."""
+    def export_canon(
+        self,
+        project_id: str,
+        folder: str | Path,
+        *,
+        clean: bool = True,
+        exclude: tuple[str, ...] = ("**/product-facts.yml", "**/product-facts.yaml"),
+    ) -> dict[str, Any]:
+        """Reproduce the canon at its original repo paths (byte-faithful whole-tree mirror).
+
+        Class H (product-facts.yml) is out of scope for the canon mirror (it
+        stays in Git) -- excluded here too because the project may also carry
+        unrelated pre-existing "product_fact_sheet" items (a separate AKDB
+        feature) that happen to reuse the repo_source_key/body_text metadata
+        shape; without this filter their (possibly stale) body_text would
+        leak into the mirror and cause spurious verify_canon "mismatched"
+        results against the live, since-edited file.
+        """
+        import fnmatch
+
         root = Path(folder)
         root.mkdir(parents=True, exist_ok=True)
         if clean:
@@ -485,6 +503,8 @@ class ImportExportService:
             repo_key = metadata.get("repo_source_key")
             body_text = metadata.get("body_text")
             if not repo_key or body_text is None:
+                continue
+            if any(fnmatch.fnmatch(repo_key, pat) for pat in exclude):
                 continue
             target = _target_for_source_key(root, repo_key, f"{item['local_id']}.md")
             target.parent.mkdir(parents=True, exist_ok=True)
