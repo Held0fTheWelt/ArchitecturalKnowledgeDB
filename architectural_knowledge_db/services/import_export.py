@@ -27,7 +27,7 @@ HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
 FRONTMATTER_RE = re.compile(r"\A---\s*\n(?P<body>.*?)\n---\s*\n", re.DOTALL)
 MARKDOWN_LINK_RE = re.compile(r"(?<!!)\[[^\]\n]+\]\(([^)\n]+)\)")
 SAD_DECISION_RE = re.compile(
-    r"^###\s+(?P<decision_id>D\d+)\s*[:.-]\s*(?P<title>.+?)\s*$",
+    r"^###\s+(?P<decision_id>D(?:\d+|-\w+))\s*[:.-]\s*(?P<title>.+?)\s*$",
     re.IGNORECASE | re.MULTILINE,
 )
 SAD_MAIN_SECTION_RE = re.compile(r"^##(?!#)[ \t]+[^\r\n]+$", re.MULTILINE)

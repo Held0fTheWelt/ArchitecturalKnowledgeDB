@@ -163,6 +163,27 @@ The glossary must not become part of D2.
     assert all("## 12." not in decision["body_md"] for decision in decisions)
 
 
+def test_parse_sad_decisions_accepts_hyphenated_ids() -> None:
+    decisions = parse_sad_decisions(
+        """## 9. Architecture Decisions
+
+### D-DB: SQLite default, PostgreSQL opt-in via a Database facade
+
+**Status:** Proposed
+
+AKDB's default embedded backend is SQLite.
+
+## 10. Quality Requirements
+
+Must not join the decision body.
+"""
+    )
+
+    assert [decision["decision_id"] for decision in decisions] == ["D-DB"]
+    assert decisions[0]["status"] == "proposed"
+    assert "Must not join" not in decisions[0]["body_md"]
+
+
 def test_document_import_preserves_multi_document_yaml(conn, tmp_path: Path) -> None:
     add_project(conn, "akdb")
     docs = tmp_path / "docs"
