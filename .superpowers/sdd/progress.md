@@ -64,5 +64,18 @@ verify` command in this codebase, so the new target-based commands are named `ex
 target-add`, `export target-list`, `export target-verify` (flush/sync are unambiguous, kept
 as-is: `export flush`, `export sync`).
 
-Next: merge `feat/auto-export` → `main` LOCALLY (no push), reinstall editable CLI if entry
-points changed, then hand off to Plan B on the TTD side.
+## Local merge to `main` (Step 2 of the runway ORDER)
+
+Merged `feat/auto-export` → `main` locally at `4aa5be6` (fast-forward not used; `--no-ff`
+merge commit, no push). Full suite re-verified green on `main`: 202 passed, 146 skipped.
+
+**Real gap found+fixed:** the runway prompt assumed "editable install already does" reflect
+merged code via the `akdb` console-script. In fact `architectural-knowledge-db` was **not
+installed at all** in this machine's Python (`pip show` found nothing, `akdb` was not on
+PATH — CLI tests only ever exercised the code via `python -m architectural_knowledge_db.cli`
+/ direct module import, never the installed script). Ran `pip install -e .` from the AKDB
+repo root; `akdb export --help` now lists `target-add`/`target-list`/`flush`/`sync`/
+`target-verify` on PATH, which Plan B's freshness gate needs (it shells out to `akdb`, never
+imports AKDB internals).
+
+Next: hand off to Plan B on the TTD side (`chore/auto-export-mirror` off `5.4`).
