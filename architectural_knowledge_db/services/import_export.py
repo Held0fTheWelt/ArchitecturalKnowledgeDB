@@ -100,6 +100,81 @@ class ImportExportService:
             exported.append(str(path))
         return {"project_id": project_id, "folder": str(root), "exported": len(exported), "files": exported}
 
+    def _sad_children(
+        self,
+        project_id: str,
+        item_type: str,
+        document_local_id: str | None,
+    ) -> list[dict[str, Any]]:
+        items = self.knowledge.list_items(
+            project_id, include_types=[item_type], include_shared=False, limit=5000
+        )
+        if document_local_id is None:
+            return items
+        return [
+            i
+            for i in items
+            if (i.get("metadata") or {}).get("source_key", "").endswith(document_local_id)
+        ]
+
+    def export_sad(
+        self,
+        project_id: str,
+        folder: str | Path,
+        document_local_id: str | None = None,
+    ) -> dict[str, Any]:
+        root = Path(folder)
+        root.mkdir(parents=True, exist_ok=True)
+        frontmatter = self._sad_children(project_id, "sad_frontmatter", document_local_id)
+        sections = sorted(
+            self._sad_children(project_id, "sad_section", document_local_id),
+            key=lambda it: (it.get("metadata") or {}).get("order", 0),
+        )
+        decisions = sorted(
+            self._sad_children(project_id, "sad_decision", document_local_id),
+            key=lambda it: (it.get("metadata") or {}).get("decision_id", ""),
+        )
+        lines: list[str] = []
+        if frontmatter:
+            front = (frontmatter[0].get("metadata") or {}).get("frontmatter")
+            if front:
+                import yaml
+
+                lines += [
+                    "---",
+                    yaml.safe_dump(front, sort_keys=False, allow_unicode=True).rstrip("\n"),
+                    "---",
+                    "",
+                ]
+        for sec in sections:
+            md = sec.get("metadata") or {}
+            lines += [f"{'#' * md.get('level', 2)} {sec['title']}", ""]
+            if md.get("role") == "decisions":
+                for d in decisions:
+                    dm = d.get("metadata") or {}
+                    did = dm.get("decision_id", "")
+                    title = d["title"].split(":", 1)[1].strip() if ":" in d["title"] else d["title"]
+                    body = (dm.get("body_md") or "").strip("\n")
+                    status_match = re.match(r"\*\*Status:\*\*\s*([^\n]+)\n?", body)
+                    if status_match:
+                        status_text = status_match.group(1).strip()
+                        body = body[status_match.end() :].lstrip("\n")
+                    else:
+                        status_text = d.get("status") or "proposed"
+                        if isinstance(status_text, str) and status_text.islower():
+                            status_text = status_text.capitalize()
+                    lines += [f"### {did}: {title}", "", f"**Status:** {status_text}", ""]
+                    if body:
+                        lines += [body, ""]
+            else:
+                lines += [(md.get("body_md") or "").strip("\n"), ""]
+        text = "\n".join(lines).rstrip("\n") + "\n"
+        (root / "architecture.md").write_text(text, encoding="utf-8", newline="\n")
+        from architectural_knowledge_db.services.uml import UMLService
+
+        UMLService(self.conn).export_diagrams(project_id, root / "UML")
+        return {"project_id": project_id, "folder": str(root), "files": ["architecture.md"]}
+
     def import_documents(
         self,
         project_id: str,
