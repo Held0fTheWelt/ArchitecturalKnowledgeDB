@@ -44,13 +44,18 @@ def _target(value: str) -> tuple[str, str]:
 
 
 def parse_impact_section(markdown: str) -> list[ChangeItemInput]:
-    lines = markdown.splitlines()
-    start = next(
-        (i + 1 for i, line in enumerate(lines) if re.fullmatch(r"##\s+Architektur-Impact\s*", line)),
-        None,
-    )
-    if start is None:
+    # Ignore fenced code blocks so grammar examples in design docs do not
+    # shadow the live `## Architektur-Impact` section.
+    unfenced = re.sub(r"```.*?```", "", markdown, flags=re.DOTALL)
+    lines = unfenced.splitlines()
+    # Prefer the last matching section (the live declaration at the end of a
+    # long design doc may follow earlier mentions of the heading in prose).
+    starts = [
+        i + 1 for i, line in enumerate(lines) if re.fullmatch(r"##\s+Architektur-Impact\s*", line)
+    ]
+    if not starts:
         return []
+    start = starts[-1]
     result: list[ChangeItemInput] = []
     for line in lines[start:]:
         if re.match(r"^#{1,6}\s+", line):

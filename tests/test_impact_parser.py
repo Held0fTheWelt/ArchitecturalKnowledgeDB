@@ -49,3 +49,17 @@ def test_supersede_definition_rejected():
 def test_add_rule_still_ok():
     items = parse_impact_section("## Architektur-Impact\n- add rule R1\n")
     assert items[0].op == "add" and items[0].target_kind == "rule"
+
+
+def test_fenced_grammar_example_is_ignored():
+    doc = """
+# Spec
+```
+## Architektur-Impact
+- <op>  ADR-1
+```
+## Architektur-Impact
+- add ADR-ARCH-0001
+"""
+    items = parse_impact_section(doc)
+    assert [(i.op, i.target_ref) for i in items] == [("add", "ADR-ARCH-0001")]
