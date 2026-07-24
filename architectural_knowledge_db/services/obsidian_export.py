@@ -195,3 +195,289 @@ def render_uml_note(item: dict[str, Any], *, registry: ObsidianNameRegistry) -> 
     if not safe.endswith("\n"):
         safe = safe + "\n"
     return f"```plantuml\n{safe}```\n"
+
+
+# Kinds that carry a meaningful lifecycle status column (D5).
+_STATUS_KINDS = frozenset({"adr", "sad_decision", "spec", "question"})
+_RENDERABLE_TYPES = frozenset(
+    {
+        "sad",
+        "sad_section",
+        "sad_decision",
+        "adr",
+        "spec",
+        "uml_diagram",
+        "rule",
+        "definition",
+        "question",
+    }
+)
+_HEADING_RE = re.compile(r"^(#{1,6})\s+(?P<title>.+?)\s*#*\s*$", re.MULTILINE)
+
+
+def _item_repo(item: dict[str, Any]) -> str:
+    metadata = item.get("metadata") or {}
+    return str(metadata.get("repository_id") or metadata.get("repo") or "Git")
+
+
+def _item_system(item: dict[str, Any]) -> str | None:
+    metadata = item.get("metadata") or {}
+    if metadata.get("system"):
+        return str(metadata["system"])
+    repo_key = str(metadata.get("repo_source_key") or "")
+    parts = repo_key.replace("\\", "/").split("/")
+    if "plugins" in parts:
+        idx = parts.index("plugins")
+        if idx + 1 < len(parts):
+            return parts[idx + 1]
+    return item.get("project_id")
+
+
+def _item_source_key(item: dict[str, Any]) -> str | None:
+    metadata = item.get("metadata") or {}
+    return metadata.get("repo_source_key") or metadata.get("source_key")
+
+
+def _item_section_key(item: dict[str, Any]) -> str | None:
+    metadata = item.get("metadata") or {}
+    return metadata.get("section_id") or metadata.get("decision_id") or item.get("local_id")
+
+
+def _status_for_item(item: dict[str, Any]) -> str | None:
+    kind = item.get("item_type") or ""
+    if kind not in _STATUS_KINDS:
+        return None
+    return item.get("status")
+
+
+def _aliases_for_item(item: dict[str, Any]) -> list[str]:
+    aliases: list[str] = []
+    local_id = item.get("local_id")
+    if local_id:
+        aliases.append(str(local_id))
+    metadata = item.get("metadata") or {}
+    for key in ("aliases", "alias"):
+        raw = metadata.get(key)
+        if isinstance(raw, list):
+            aliases.extend(str(a) for a in raw)
+        elif isinstance(raw, str) and raw:
+            aliases.append(raw)
+    seen: set[str] = set()
+    out: list[str] = []
+    for a in aliases:
+        if a not in seen:
+            seen.add(a)
+            out.append(a)
+    return out
+
+
+def _slug_heading(title: str) -> str:
+    title = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", title)
+    title = re.sub(r"<[^>]+>", "", title)
+    title = re.sub(r"[`*_~]", "", title).strip().lower()
+    slug = re.sub(r"[^\w\- ]", "", title, flags=re.UNICODE)
+    return re.sub(r"\s+", "-", slug)
+
+
+def _heading_title_for_slug(body: str, slug: str) -> str | None:
+    counts: dict[str, int] = {}
+    for match in _HEADING_RE.finditer(strip_code_fences(body or "")):
+        title = match.group("title").strip()
+        base = _slug_heading(title)
+        duplicate_index = counts.get(base, 0)
+        counts[base] = duplicate_index + 1
+        candidate = base if duplicate_index == 0 else f"{base}-{duplicate_index}"
+        if candidate == slug:
+            return title
+    return None
+
+
+def _stable_item_key(item: dict[str, Any]) -> tuple[str, str, str]:
+    return (
+        str(item.get("item_type") or ""),
+        str(item.get("local_id") or ""),
+        str(item.get("item_uid") or ""),
+    )
+
+
+def render_note(
+    item: dict[str, Any],
+    *,
+    registry: ObsidianNameRegistry,
+    resolve_target: Callable[[str], str | None],
+) -> tuple[str, bytes]:
+    """Render one knowledge item to ``(<Note Name>.md, utf-8 bytes)``."""
+    name = registry.resolve(item["item_uid"])
+    if name is None:
+        name = registry.register(
+            item_uid=item["item_uid"],
+            item_type=str(item.get("item_type") or ""),
+            title=str(item.get("title") or item.get("local_id") or item["item_uid"]),
+            repo=_item_repo(item),
+            section_key=_item_section_key(item),
+        )
+    kind = str(item.get("item_type") or "note")
+    metadata = item.get("metadata") or {}
+    body_text = metadata.get("body_text") or ""
+
+    if kind == "uml_diagram":
+        body = render_uml_note(item, registry=registry)
+        outgoing: list[str] = []
+    else:
+        body, _unresolved = rewrite_links(body_text, registry=registry, resolve_target=resolve_target)
+        outgoing = [f"[[{m}]]" for m in re.findall(r"\[\[([^\]]+)\]\]", body)]
+
+    fm = build_frontmatter(
+        kind=kind,
+        status=_status_for_item(item),
+        repo=_item_repo(item),
+        system=_item_system(item),
+        source_key=_item_source_key(item),
+        aliases=_aliases_for_item(item),
+        tags=[kind],
+        links=outgoing,
+    )
+    if body and not body.endswith("\n"):
+        body = body + "\n"
+    text = f"{fm}\n{body}" if body else fm
+    return f"{name}.md", text.encode("utf-8")
+
+
+def render_system_moc(
+    project_id: str,
+    namespace: str,
+    items: list[dict[str, Any]],
+    *,
+    registry: ObsidianNameRegistry,
+    system: str,
+) -> tuple[str, bytes]:
+    """Per-system MOC: static wikilink list + Dataview block (D7)."""
+    del project_id, namespace
+    by_kind: dict[str, list[str]] = defaultdict(list)
+    for item in sorted(items, key=_stable_item_key):
+        if _item_system(item) != system:
+            continue
+        name = registry.resolve(item["item_uid"])
+        if not name:
+            continue
+        by_kind[str(item.get("item_type") or "note")].append(name)
+
+    lines = [
+        f"# MOC — {system}",
+        "",
+        "## Notes",
+        "",
+    ]
+    for kind in sorted(by_kind):
+        lines.append(f"### {kind}")
+        lines.append("")
+        for name in sorted(by_kind[kind]):
+            lines.append(f"- [[{name}]]")
+        lines.append("")
+    lines.extend(
+        [
+            "## Dataview",
+            "",
+            "```dataview",
+            "TABLE kind, status, repo",
+            f'WHERE system = "{system}"',
+            "SORT kind ASC, file.name ASC",
+            "```",
+            "",
+        ]
+    )
+    note_name = f"MOC — {system}"
+    text = "\n".join(lines)
+    return f"{note_name}.md", text.encode("utf-8")
+
+
+def expected_vault_files(
+    conn: Any,
+    project_id: str,
+    namespace: str,
+    *,
+    workspace: Any | None = None,
+) -> dict[str, bytes]:
+    """Deterministic ``{namespace/<Note>.md → bytes}`` map for one project (D1/D4/D5/D6/D7).
+
+    Two passes: (1) register all names, (2) render bodies so links resolve forward refs.
+    ``workspace`` is reserved for Plan C cross-repo resolution; v1 is intra-project only.
+    """
+    del workspace
+    from architectural_knowledge_db.services.knowledge import KnowledgeService
+
+    items = KnowledgeService(conn).list_items(project_id, include_shared=False, limit=100000)
+    renderable = [
+        item
+        for item in items
+        if item.get("item_type") in _RENDERABLE_TYPES and (item.get("title") or item.get("local_id"))
+    ]
+    renderable.sort(key=_stable_item_key)
+
+    registry = ObsidianNameRegistry()
+    path_index: dict[str, str] = {}
+    uid_body: dict[str, str] = {}
+
+    for item in renderable:
+        name = registry.register(
+            item_uid=item["item_uid"],
+            item_type=str(item.get("item_type") or ""),
+            title=str(item.get("title") or item.get("local_id") or item["item_uid"]),
+            repo=_item_repo(item),
+            section_key=_item_section_key(item),
+        )
+        source_key = _item_source_key(item)
+        if source_key:
+            normalized = str(source_key).replace("\\", "/")
+            path_index[normalized] = name
+            path_index[normalized.split("/")[-1]] = name
+        uid_body[item["item_uid"]] = (item.get("metadata") or {}).get("body_text") or ""
+
+    def resolve_target(href: str, *, current_uid: str | None = None) -> str | None:
+        href = href.strip()
+        if href.startswith(("http://", "https://", "mailto:")):
+            return None
+        if "#" in href:
+            path, frag = href.split("#", 1)
+        else:
+            path, frag = href, ""
+        note: str | None = None
+        if not path:
+            if current_uid:
+                note = registry.resolve(current_uid)
+        else:
+            key = path.replace("\\", "/")
+            note = path_index.get(key) or path_index.get(key.split("/")[-1])
+        if note is None:
+            return None
+        if not frag:
+            return note
+        body = ""
+        if not path and current_uid:
+            body = uid_body.get(current_uid, "")
+        else:
+            for uid, text in uid_body.items():
+                if registry.resolve(uid) == note:
+                    body = text
+                    break
+        heading = _heading_title_for_slug(body, frag) or frag.replace("-", " ")
+        return f"{note}#{heading}"
+
+    files: dict[str, bytes] = {}
+    for item in renderable:
+        uid = item["item_uid"]
+
+        def _resolve(href: str, _uid: str = uid) -> str | None:
+            return resolve_target(href, current_uid=_uid)
+
+        rel_name, payload = render_note(item, registry=registry, resolve_target=_resolve)
+        files[f"{namespace}/{rel_name}"] = payload
+
+    systems = sorted({_item_system(item) or project_id for item in renderable})
+    for system in systems:
+        moc_name, moc_bytes = render_system_moc(
+            project_id, namespace, renderable, registry=registry, system=system
+        )
+        files[f"{namespace}/{moc_name}"] = moc_bytes
+
+    return dict(sorted(files.items()))
