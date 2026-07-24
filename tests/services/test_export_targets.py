@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import pytest
+
+from architectural_knowledge_db.models import ProjectUpsert, RepositoryRegistration
 from architectural_knowledge_db.services.export_targets import ExportTargetsService
 from architectural_knowledge_db.services.projects import ProjectService
-from architectural_knowledge_db.models import ProjectUpsert
+from architectural_knowledge_db.services.repositories import RepositoryService
 
 
 def _proj(conn, pid="et-test"):
@@ -59,6 +62,153 @@ def test_register_normalizes_backslashes_to_posix_for_cross_platform_dest_root(c
                         dest_root="docs\\architecture\\_generated", layout="arc42-canon",
                         content_kinds=["sad"])
     assert svc.get_target(pid, "t")["dest_root"] == "docs/architecture/_generated"
+
+
+def test_relative_destination_resolves_against_registered_repository(conn, tmp_path):
+    pid = _proj(conn)
+    repository_root = tmp_path / "Git"
+    repository_root.mkdir()
+    RepositoryService(conn).register_repository(
+        pid,
+        RepositoryRegistration(repository_id="ttd-main", local_path=str(repository_root)),
+    )
+    svc = ExportTargetsService(conn)
+    svc.register_target(
+        pid,
+        "t",
+        repository_id="ttd-main",
+        dest_root="docs/architecture/_generated",
+        layout="arc42-canon",
+        content_kinds=["sad"],
+    )
+
+    assert svc.resolve_dest_root(pid, "t") == repository_root / "docs/architecture/_generated"
+
+
+def test_absolute_destination_remains_absolute(conn, tmp_path):
+    pid = _proj(conn)
+    destination = tmp_path / "mirror"
+    svc = ExportTargetsService(conn)
+    svc.register_target(
+        pid,
+        "t",
+        repository_id="Git",
+        dest_root=str(destination),
+        layout="arc42-canon",
+        content_kinds=["sad"],
+    )
+
+    assert svc.resolve_dest_root(pid, "t") == destination
+
+
+@pytest.mark.parametrize("destination", ["", ".", "..", "../mirror", "docs/../mirror"])
+def test_unsafe_destination_is_rejected(conn, destination):
+    pid = _proj(conn)
+
+    with pytest.raises(ValueError):
+        ExportTargetsService(conn).register_target(
+            pid,
+            "t",
+            repository_id="Git",
+            dest_root=destination,
+            layout="arc42-canon",
+            content_kinds=["sad"],
+        )
+
+
+def test_filesystem_root_destination_is_rejected(conn):
+    pid = _proj(conn)
+
+    with pytest.raises(ValueError, match="filesystem root"):
+        ExportTargetsService(conn).register_target(
+            pid,
+            "t",
+            repository_id="Git",
+            dest_root="/",
+            layout="arc42-canon",
+            content_kinds=["sad"],
+        )
+
+
+def test_relative_destination_requires_registered_repository(conn):
+    pid = _proj(conn)
+    svc = ExportTargetsService(conn)
+    svc.register_target(
+        pid,
+        "t",
+        repository_id="missing",
+        dest_root="docs/architecture/_generated",
+        layout="arc42-canon",
+        content_kinds=["sad"],
+    )
+
+    with pytest.raises(ValueError, match="requires registered repository"):
+        svc.resolve_dest_root(pid, "t")
+
+
+def test_missing_registered_path_uses_matching_checkout_remote(
+    conn, tmp_path, monkeypatch
+):
+    pid = _proj(conn)
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    RepositoryService(conn).register_repository(
+        pid,
+        RepositoryRegistration(
+            repository_id="ttd-main",
+            local_path=str(tmp_path / "missing"),
+            remote_url_sanitized="https://example.test/ttd.git",
+        ),
+    )
+    svc = ExportTargetsService(conn)
+    svc.register_target(
+        pid,
+        "t",
+        repository_id="ttd-main",
+        dest_root="docs/architecture/_generated",
+        layout="arc42-canon",
+        content_kinds=["sad"],
+    )
+    monkeypatch.chdir(checkout)
+    monkeypatch.setattr(
+        "architectural_knowledge_db.services.export_targets.detect_remote_url",
+        lambda _path: "https://example.test/ttd.git",
+    )
+
+    assert svc.resolve_dest_root(pid, "t") == checkout / "docs/architecture/_generated"
+
+
+def test_missing_registered_path_rejects_unrelated_checkout(
+    conn, tmp_path, monkeypatch
+):
+    pid = _proj(conn)
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    RepositoryService(conn).register_repository(
+        pid,
+        RepositoryRegistration(
+            repository_id="ttd-main",
+            local_path=str(tmp_path / "missing"),
+            remote_url_sanitized="https://example.test/ttd.git",
+        ),
+    )
+    svc = ExportTargetsService(conn)
+    svc.register_target(
+        pid,
+        "t",
+        repository_id="ttd-main",
+        dest_root="docs/architecture/_generated",
+        layout="arc42-canon",
+        content_kinds=["sad"],
+    )
+    monkeypatch.chdir(checkout)
+    monkeypatch.setattr(
+        "architectural_knowledge_db.services.export_targets.detect_remote_url",
+        lambda _path: "https://example.test/akdb.git",
+    )
+
+    with pytest.raises(ValueError, match="does not match its remote"):
+        svc.resolve_dest_root(pid, "t")
 
 
 def test_set_enabled(conn):

@@ -118,6 +118,10 @@ Search uses SQLite FTS5 or PostgreSQL `tsvector`; LIKE/ILIKE is fallback. Contex
 
 The self-repository is scanned read-only. Findings are advisory; corrections are authored in AKDB and re-exported.
 
+### 6.7 Export-target destination resolution
+
+Incremental export, full synchronization, and freshness verification all ask `ExportTargetsService` to resolve the destination. An explicit absolute destination remains absolute after root/path-traversal validation. A relative destination is bound to the target's registered repository: an existing registered `local_path` wins; a source-root candidate or current checkout is accepted only when its sanitized Git remote matches the registration. If repository identity cannot be proven, export fails before any write. See [authoring/export sequence](UML/sequence/sad-authoring-export-sequence.puml).
+
 ## 7. Deployment View
 
 See [dual-backend deployment](UML/deployment/dual-backend-deployment.puml).
@@ -131,6 +135,8 @@ See [dual-backend deployment](UML/deployment/dual-backend-deployment.puml).
 
 Configuration includes `AKDB_DATABASE_PATH`, `AKDB_DATA_ROOT`, `AKDB_DB_URL`, `AKDB_DEFAULT_PROJECT`, `AKDB_SOURCE_ROOT`, `AKDB_RECALL_BACKEND`, and `AKDB_EMBED_URL`. PostgreSQL backup uses `pg_dump`; SQLite uses a consistent backup operation. Runtime DBs and backups are ignored.
 
+Portable export targets store a repository id plus a repository-relative destination such as `docs/architecture/_generated`. Workstation-specific absolute repository paths remain registration data; restored snapshots resolve only to a checkout whose identity matches the registered Git remote.
+
 ## 8. Crosscutting Concepts
 
 - **Authority context:** self-project is DB-owned; imported contexts retain declared external authority.
@@ -141,7 +147,7 @@ Configuration includes `AKDB_DATABASE_PATH`, `AKDB_DATA_ROOT`, `AKDB_DB_URL`, `A
 - **Search:** all knowledge uses the shared FTS spine; embeddings are optional acceleration.
 - **Backend portability:** differences stay in database, connection, migration, search, backup seams.
 - **Transactions:** CLI/API/MCP commit success and roll back failure.
-- **Safety:** scans are read-only, destructive DB operations explicit, export roots validated.
+- **Export safety:** empty, current, parent-traversal, and filesystem-root destinations are rejected. Relative destinations require a registered repository and fail closed unless an existing registration path or matching Git checkout proves the target boundary.
 - **Public boundary:** only AKDB-owned architecture is exported here.
 
 ## 9. Architecture Decisions
@@ -157,6 +163,7 @@ Configuration includes `AKDB_DATABASE_PATH`, `AKDB_DATA_ROOT`, `AKDB_DB_URL`, `A
 | D-SoR | AKDB is system of record for its own architecture | Accepted |
 | D-SAD | SAD and UML authoring use supported DB-native services | Accepted |
 | D-MULTI | Root and subsystem SADs export hierarchically | Accepted |
+| D-EXPORT | Relative export destinations are repository-bound and fail closed | Accepted |
 
 ### D1: Active standalone Outer Tool classification
 
@@ -212,6 +219,12 @@ SadService and UMLService are exposed through CLI, API, and MCP. Private item up
 
 Each SAD owns an export source_key; diagrams carry sad_document_id; export never mixes children.
 
+### D-EXPORT: Relative export destinations are repository-bound and fail closed
+
+**Status:** Accepted
+
+Export targets bind a destination to a registered repository. Existing registered paths are authoritative locally; restored-checkout fallbacks require a matching sanitized Git remote. Unsafe roots and traversal are rejected, and unresolved repository identity stops the operation before writes. See [ADR-AKDB-0002](../adr/adr-akdb-0002-bind-relative-export-destinations-to-registered-repositories.md).
+
 ## 10. Quality Requirements
 
 | Quality | Scenario | Evidence |
@@ -221,6 +234,7 @@ Each SAD owns an export source_key; diagrams carry sad_document_id; export never
 | Backend parity | Same behavior passes SQLite and PostgreSQL. | parametrized pytest |
 | Project isolation | No undeclared cross-project leakage. | `test_project_isolation.py` |
 | Determinism | Unchanged DB exports byte-identically. | round-trip and export verification |
+| Export boundary safety | A relative mirror resolves to its registered repository; an unrelated checkout is rejected before writes. | `tests/services/test_export_targets.py`, export sync/verify tests |
 | Provenance | Self uses `akdb://`; imports retain origins. | authoring tests |
 | Agent compatibility | MCP authoring and retrieval tools dispatch consistently. | MCP tests |
 
@@ -234,6 +248,7 @@ Each SAD owns an export source_key; diagrams carry sad_document_id; export never
 | No PostgreSQL pool | High concurrency opens connections. | Add after measurement. |
 | Backend ranking variance | Result order can differ. | Test relevance invariants. |
 | Mixed authority contexts | Users may trust wrong owner. | Always surface URI and authority. |
+| Unavailable repository registration | Portable snapshot export cannot resolve its destination. | Fail closed; restore a valid registration path or run in a checkout with the registered sanitized remote. |
 | Generated file edits | Changes vanish. | README warning and deterministic CI gate. |
 
 ## 12. Glossary

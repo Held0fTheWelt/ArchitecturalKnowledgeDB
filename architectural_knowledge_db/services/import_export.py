@@ -635,7 +635,7 @@ class ImportExportService:
         target = targets.get_target(project_id, target_id)
         if target is None:
             raise ValueError(f"Unknown export target {target_id} in project {project_id}")
-        dest_root = Path(target["dest_root"])
+        dest_root = targets.resolve_dest_root(project_id, target_id)
         rows = targets.drain_dirty(project_id, target_id)
         written: list[str] = []
         deleted: list[str] = []
@@ -741,7 +741,7 @@ class ImportExportService:
         target = ExportTargetsService(self.conn).get_target(project_id, target_id)
         if target is None:
             raise ValueError(f"Unknown export target {target_id} in project {project_id}")
-        dest_root = Path(target["dest_root"])
+        dest_root = ExportTargetsService(self.conn).resolve_dest_root(project_id, target_id)
         expected = self._expected_mirror_files(project_id, dest_root)
         actual = (
             {
@@ -800,7 +800,7 @@ class ImportExportService:
         target = targets.get_target(project_id, target_id)
         if target is None:
             raise ValueError(f"Unknown export target {target_id} in project {project_id}")
-        dest_root = Path(target["dest_root"])
+        dest_root = targets.resolve_dest_root(project_id, target_id)
         dest_root.mkdir(parents=True, exist_ok=True)
         expected = self._expected_mirror_files(project_id, dest_root)
         written: list[str] = []

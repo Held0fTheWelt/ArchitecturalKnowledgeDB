@@ -1,11 +1,13 @@
 @startuml akdb-sad-export
-title AKDB - DB-Native SAD/UML Authoring and Export
+title AKDB - DB-Native SAD/UML Authoring and Repository-Bound Export
 actor Author
 participant "CLI / API / MCP" as Surface
 participant SadService
 participant UMLService
 participant ImportExportService
+participant ExportTargetsService as Targets
 database "Database facade" as DB
+participant "Git repository checkout" as Repo
 participant "docs/architecture" as Projection
 Author -> Surface : upsert SAD document
 Surface -> SadService : SadDocumentInput
@@ -18,9 +20,23 @@ end
 Author -> Surface : create/update associated diagram
 Surface -> UMLService : diagram source + source_key + SAD id
 UMLService -> DB : diagram, elements, relationships
-Author -> Surface : export SAD project
-Surface -> ImportExportService : export_sad(project, root)
-ImportExportService -> DB : aggregate all SADs + associated UML
+Author -> Surface : verify or synchronize export target
+Surface -> ImportExportService : verify/sync(project, target)
+ImportExportService -> Targets : resolve_dest_root(project, target)
+Targets -> DB : target + repository registration
+alt explicit absolute destination
+ Targets --> ImportExportService : validated absolute path
+else existing registered local_path
+ Targets --> ImportExportService : repository root / relative destination
+else restored snapshot
+ Targets -> Repo : compare sanitized Git remote
+ alt remote matches registration
+  Targets --> ImportExportService : checkout root / relative destination
+ else identity not proven
+  Targets --> ImportExportService : fail closed before write
+ end
+end
+ImportExportService -> DB : aggregate SAD/ADR/UML canon
 ImportExportService -> Projection : safe hierarchical paths, UTF-8 LF
-ImportExportService --> Author : document/file counts
+ImportExportService --> Author : verification or file counts
 @enduml

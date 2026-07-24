@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+import os
 import sqlite3
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 from architectural_knowledge_db.services.jsonutil import dumps, loads
 from architectural_knowledge_db.services.projects import ProjectService
+from architectural_knowledge_db.services.repositories import (
+    detect_remote_url,
+    resolve_local_path_alias,
+    sanitize_remote_url,
+)
 
 
 class ExportTargetsService:
@@ -82,6 +89,50 @@ class ExportTargetsService:
         rows = self.conn.execute(sql, params).fetchall()
         return [_hydrate_target(row) for row in rows]
 
+    def resolve_dest_root(self, project_id: str, target_id: str) -> Path:
+        target = self.get_target(project_id, target_id)
+        if target is None:
+            raise ValueError(f"Unknown export target {target_id} in project {project_id}")
+        configured = Path(target["dest_root"])
+        if configured.is_absolute():
+            return configured
+
+        repository = self.conn.execute(
+            """
+            SELECT local_path, remote_url_sanitized
+            FROM repositories
+            WHERE project_id = ? AND repository_id = ?
+            """,
+            (project_id, target["repository_id"]),
+        ).fetchone()
+        if repository is None:
+            raise ValueError(
+                f"Relative export target {target_id} requires registered repository "
+                f"{target['repository_id']} in project {project_id}"
+            )
+
+        registered_root = Path(resolve_local_path_alias(repository["local_path"]))
+        if registered_root.is_dir():
+            return registered_root / configured
+
+        source_root = os.getenv("AKDB_SOURCE_ROOT")
+        if source_root:
+            source_candidate = Path(source_root) / target["repository_id"]
+            if _matches_registered_repository(source_candidate, repository):
+                return source_candidate / configured
+
+        # CI restores a portable DB snapshot whose registered workstation path
+        # does not exist. Accept its checkout root only when the Git remote proves
+        # that it is the repository named by the export target.
+        cwd_candidate = Path.cwd()
+        if _matches_registered_repository(cwd_candidate, repository):
+            return cwd_candidate / configured
+        raise ValueError(
+            f"Cannot resolve repository {target['repository_id']} for relative export "
+            f"target {target_id}; registered path does not exist and the current "
+            "checkout does not match its remote"
+        )
+
     def set_enabled(self, project_id: str, target_id: str, enabled: bool) -> None:
         self.conn.execute(
             """
@@ -149,7 +200,31 @@ def _normalize_dest_root(dest_root: str) -> str:
     # Registration can happen on Windows (typer.Path str() renders "\\"), while the
     # freshness gate / CI may later run `Path(dest_root) / ...` on Linux, where "\\"
     # is not a path separator. Store POSIX-style so it resolves on either OS.
-    return str(dest_root).replace("\\", "/")
+    normalized = str(dest_root).strip().replace("\\", "/")
+    if not normalized:
+        raise ValueError("Export destination must not be empty.")
+    if any(part in {".", ".."} for part in normalized.split("/")):
+        raise ValueError("Export destination must not contain current or parent path segments.")
+
+    posix_path = PurePosixPath(normalized)
+    windows_path = PureWindowsPath(normalized)
+    if (posix_path.is_absolute() and len(posix_path.parts) == 1) or (
+        windows_path.is_absolute() and len(windows_path.parts) == 1
+    ):
+        raise ValueError("Export destination must not be a filesystem root.")
+    return posix_path.as_posix()
+
+
+def _matches_registered_repository(candidate: Path, repository: Any) -> bool:
+    if not candidate.is_dir():
+        return False
+    expected_remote = repository["remote_url_sanitized"]
+    if not expected_remote:
+        return False
+    actual_remote = detect_remote_url(str(candidate))
+    if not actual_remote:
+        return False
+    return sanitize_remote_url(actual_remote).casefold() == str(expected_remote).casefold()
 
 
 def _bool_param(conn: Any, value: bool) -> Any:
