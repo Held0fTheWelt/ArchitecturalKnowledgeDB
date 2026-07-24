@@ -431,6 +431,197 @@ def _index_item_paths(path_index: dict[str, str], item: dict[str, Any], name: st
     path_index[f"{repo}/{normalized.split('/')[-1]}"] = name
 
 
+def _adr_status_bucket(status: str | None) -> str:
+    raw = (status or "unknown").strip().lower()
+    if raw in {"proposed", "accepted", "current", "superseded"}:
+        return raw
+    return raw or "unknown"
+
+
+def _spec_lifecycle_bucket(item: dict[str, Any]) -> str:
+    details = item.get("details") or {}
+    metadata = item.get("metadata") or {}
+    raw = str(
+        details.get("lifecycle")
+        or metadata.get("lifecycle")
+        or item.get("status")
+        or "unknown"
+    ).strip().lower()
+    if raw in {"draft", "ready", "implemented", "superseded"}:
+        return raw
+    return raw or "unknown"
+
+
+def _default_namespaces(project_ids: list[str]) -> dict[str, str]:
+    """Map project_id → vault namespace folder (heuristic; callers may override)."""
+    known = {
+        "tiny-tool-development": "TTD",
+        "architectural-knowledge-db": "AKDB",
+        "internal-index-service": "IIS",
+        "llm-store": "LLM",
+        "smart-content-diet": "SCD",
+    }
+    out: dict[str, str] = {}
+    for pid in project_ids:
+        if pid in known:
+            out[pid] = known[pid]
+        else:
+            out[pid] = pid.upper().replace("_", "-")[:32] or "PROJECT"
+    return out
+
+
+def build_workspace_index(
+    conn: Any,
+    project_ids: list[str],
+    *,
+    global_registry: ObsidianNameRegistry,
+    workspace: Any | None = None,
+    namespaces: dict[str, str] | None = None,
+) -> dict[str, bytes]:
+    """Cross-repo ``_index/`` cockpit MOCs (§3.5, D7). Owned by no single namespace."""
+    del workspace  # reserved; MOCs use the registry only today
+    ns_map = namespaces or _default_namespaces(project_ids)
+    registry = global_registry
+
+    adrs_by_status: dict[str, list[str]] = defaultdict(list)
+    specs_by_life: dict[str, list[str]] = defaultdict(list)
+    systems: list[tuple[str, str, str]] = []  # (project_id, namespace, moc_link_name)
+
+    for project_id in project_ids:
+        namespace = ns_map.get(project_id, project_id)
+        renderable = _list_renderable_items(conn, project_id)
+        project_systems = sorted({_item_system(item) or project_id for item in renderable})
+        if project_systems:
+            # Link to the first (or project-named) per-system MOC as the namespace entry.
+            primary = project_id if project_id in project_systems else project_systems[0]
+            for system in project_systems:
+                if system == namespace or system == primary:
+                    primary = system
+                    break
+            systems.append((project_id, namespace, f"MOC — {primary}"))
+        else:
+            systems.append((project_id, namespace, f"MOC — {namespace}"))
+
+        for item in renderable:
+            name = registry.resolve(item["item_uid"])
+            if not name:
+                continue
+            kind = item.get("item_type")
+            if kind == "adr":
+                adrs_by_status[_adr_status_bucket(item.get("status"))].append(name)
+            elif kind == "spec":
+                specs_by_life[_spec_lifecycle_bucket(item)].append(name)
+
+    files: dict[str, bytes] = {}
+    files["_index/START-HERE.md"] = _render_start_here(ns_map, systems).encode("utf-8")
+    files["_index/MOC — Entscheidungen.md"] = _render_grouped_moc(
+        title="MOC — Entscheidungen",
+        intro="All ADRs across workshop namespaces, grouped by status.",
+        groups=adrs_by_status,
+        group_order=("proposed", "accepted", "current", "superseded"),
+        dataview=(
+            "TABLE status, repo, system\n"
+            'WHERE kind = "adr"\n'
+            "SORT status ASC, file.name ASC"
+        ),
+    ).encode("utf-8")
+    files["_index/MOC — Specs.md"] = _render_grouped_moc(
+        title="MOC — Specs",
+        intro="Specs across workshop namespaces, grouped by lifecycle.",
+        groups=specs_by_life,
+        group_order=("draft", "ready", "implemented", "superseded"),
+        dataview=(
+            "TABLE status, repo, system\n"
+            'WHERE kind = "spec"\n'
+            "SORT status ASC, file.name ASC"
+        ),
+    ).encode("utf-8")
+    files["_index/MOC — Systeme.md"] = _render_systeme_moc(systems).encode("utf-8")
+    return dict(sorted(files.items()))
+
+
+def _render_start_here(
+    ns_map: dict[str, str], systems: list[tuple[str, str, str]]
+) -> str:
+    lines = [
+        "# START-HERE",
+        "",
+        "This vault is the **whole-workshop** Obsidian cockpit over AKDB.",
+        "Each namespace folder is one registered project; `_index/` holds cross-repo Maps of Content.",
+        "",
+        "## Namespaces",
+        "",
+    ]
+    for project_id, namespace, moc_name in systems:
+        lines.append(f"- **{namespace}** (`{project_id}`) → [[{moc_name}]]")
+    lines.extend(
+        [
+            "",
+            "## Cockpit MOCs",
+            "",
+            "- [[MOC — Entscheidungen]] — ADRs by status",
+            "- [[MOC — Specs]] — specs by lifecycle",
+            "- [[MOC — Systeme]] — one row per system/namespace",
+            "",
+            "Static lists work with zero plugins; Dataview blocks below each list are interactive when the plugin is enabled.",
+            "",
+        ]
+    )
+    del ns_map
+    return "\n".join(lines)
+
+
+def _render_grouped_moc(
+    *,
+    title: str,
+    intro: str,
+    groups: dict[str, list[str]],
+    group_order: tuple[str, ...],
+    dataview: str,
+) -> str:
+    lines = [f"# {title}", "", intro, ""]
+    seen: set[str] = set()
+    for key in list(group_order) + sorted(k for k in groups if k not in group_order):
+        names = sorted(set(groups.get(key, [])))
+        if not names:
+            continue
+        seen.add(key)
+        lines.append(f"## {key}")
+        lines.append("")
+        for name in names:
+            lines.append(f"- [[{name}]]")
+        lines.append("")
+    lines.extend(["## Dataview", "", "```dataview", dataview, "```", ""])
+    return "\n".join(lines)
+
+
+def _render_systeme_moc(systems: list[tuple[str, str, str]]) -> str:
+    lines = [
+        "# MOC — Systeme",
+        "",
+        "One entry per workshop project / namespace → its per-system MOC.",
+        "",
+        "## Systems",
+        "",
+    ]
+    for project_id, namespace, moc_name in sorted(systems, key=lambda t: t[1]):
+        lines.append(f"- **{namespace}** (`{project_id}`) → [[{moc_name}]]")
+    lines.extend(
+        [
+            "",
+            "## Dataview",
+            "",
+            "```dataview",
+            "TABLE system, repo, kind",
+            "WHERE system",
+            "SORT system ASC, file.name ASC",
+            "```",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def build_global_registry(conn: Any, project_ids: list[str]) -> ObsidianNameRegistry:
     """Register every renderable item across projects into one name space (D4).
 
