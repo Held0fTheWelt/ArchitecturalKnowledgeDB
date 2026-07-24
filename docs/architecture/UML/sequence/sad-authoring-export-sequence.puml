@@ -43,7 +43,7 @@ alt multiple body_text owners
 else exactly one body owner
  ImportExportService -> Projector : canonical body + source path + target path
  Projector -> Projector : map exported SAD/ADR/UML links into mirror
- Projector -> Projector : map non-exported links back to registered repository
+ Projector -> Projector : map non-exported and workspace-sibling links
  Projector --> ImportExportService : target-specific bytes
  ImportExportService -> Projection : safe hierarchical paths, preserved encoding
  ImportExportService --> Author : verification or file counts

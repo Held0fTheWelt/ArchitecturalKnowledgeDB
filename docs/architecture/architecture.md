@@ -124,7 +124,7 @@ Incremental export, full synchronization, and freshness verification all ask `Ex
 
 ### 6.8 Target-specific document projection
 
-Imported document bodies retain links relative to their canonical `repo_source_key`. During verification, incremental export, and full synchronization, Markdown links outside fenced examples are projected to the target layout: links to exported SAD, ADR, or UML artifacts point to their mirror locations; links to non-exported repository artifacts point back to their canonical repository locations when the target is repository-relative. External URLs, fragments, and explicit repository-root references remain unchanged. Exactly one knowledge item may own `body_text` for a `repo_source_key`; derived structured records may share the key but cannot compete as export payloads.
+Imported document bodies retain links relative to their canonical `repo_source_key`. During verification, incremental export, and full synchronization, Markdown links outside fenced examples are projected to the target layout: links to exported SAD, ADR, or UML artifacts point to their mirror locations; links to non-exported repository or adjacent-workspace artifacts are rebased from their canonical relative locations when the target is repository-relative. External URLs, fragments, and explicit repository-root references remain unchanged. Exactly one knowledge item may own `body_text` for a `repo_source_key`; derived structured records may share the key but cannot compete as export payloads.
 
 ## 7. Deployment View
 
@@ -236,7 +236,7 @@ Export targets bind a destination to a registered repository. Existing registere
 
 **Status:** Accepted
 
-Canonical document bodies retain repository-source link semantics. Verification, incremental export, and full synchronization apply the same target-specific Markdown projection. Exportable SAD/ADR/UML links resolve inside the mirror; non-exported artifacts resolve against the registered repository when possible. Fenced examples, external URLs, fragments, and explicit repository-root references are unchanged. Multiple `body_text` owners for one `repo_source_key` are rejected. See [ADR-AKDB-0003](../adr/adr-akdb-0003-project-canonical-links-into-target-mirrors.md).
+Canonical document bodies retain repository-source link semantics. Verification, incremental export, and full synchronization apply the same target-specific Markdown projection. Exportable SAD/ADR/UML links resolve inside the mirror; non-exported repository and adjacent-workspace artifacts resolve from their canonical relative locations when possible. Fenced examples, external URLs, fragments, and explicit repository-root references are unchanged. Multiple `body_text` owners for one `repo_source_key` are rejected. See [ADR-AKDB-0003](../adr/adr-akdb-0003-project-canonical-links-into-target-mirrors.md).
 
 ## 10. Quality Requirements
 

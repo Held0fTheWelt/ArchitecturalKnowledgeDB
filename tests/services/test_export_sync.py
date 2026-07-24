@@ -16,6 +16,7 @@ FIXTURES = {
     "docs/architecture/plugins/X/architecture.md": (
         "# X SAD\n\n"
         "[Descriptor](../../../../AIPlugins/X/X.uplugin)\n\n"
+        "[Workspace sibling](../../../../../Documentation/X/README.md)\n\n"
         "[UML](../../../../UML/Plugins/X/TRACEABILITY.md#models)\n\n"
         "[Peer](../Y/architecture.md)\n\n"
         "[Root-style](docs/ADR/README.md)\n\n"
@@ -78,6 +79,7 @@ def test_sync_rebases_links_from_repository_location_to_mirror_location(
         encoding="utf-8"
     )
     assert "[Descriptor](../../../../../AIPlugins/X/X.uplugin)" in rendered
+    assert "[Workspace sibling](../../../../../../Documentation/X/README.md)" in rendered
     assert "[UML](../../UML/Plugins/X/TRACEABILITY.md#models)" in rendered
     assert "[Peer](../Y/architecture.md)" in rendered
     assert "[Root-style](docs/ADR/README.md)" in rendered

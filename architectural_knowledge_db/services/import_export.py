@@ -2077,8 +2077,6 @@ def _rebase_markdown_target(
         return raw_target
 
     canonical_target = posixpath.normpath(posixpath.join(source_parent, normalized_path))
-    if canonical_target == ".." or canonical_target.startswith("../"):
-        return raw_target
     mapped_target = _mirror_path(Path("."), canonical_target)
     if mapped_target is not None:
         mapped_relative = mapped_target.as_posix()
