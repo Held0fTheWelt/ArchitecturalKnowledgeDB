@@ -1344,6 +1344,58 @@ def obsidian_verify(
         raise typer.Exit(code=1)
 
 
+def _parse_projects_csv(projects: str) -> list[str]:
+    return [p.strip() for p in projects.split(",") if p.strip()]
+
+
+def _resolve_vault_root(conn: Any, project_ids: list[str], vault_root: Path | None) -> Path:
+    if vault_root is not None:
+        return Path(vault_root)
+    from architectural_knowledge_db.services.export_targets import ExportTargetsService
+
+    ets = ExportTargetsService(conn)
+    for pid in project_ids:
+        for target in ets.list_targets(pid):
+            if target.get("enabled") and target.get("layout") == "obsidian-vault":
+                dest = ets.resolve_dest_root(pid, target["target_id"])
+                return Path(dest).parent
+    raise typer.BadParameter(
+        "Could not infer vault root from obsidian-vault targets; pass --vault-root."
+    )
+
+
+@obsidian_app.command("build-index")
+def obsidian_build_index(
+    projects: str = typer.Option(..., "--projects", help="Comma-separated project ids."),
+    vault_root: Path | None = typer.Option(None, "--vault-root", help="Vault repo root (owns _index/)."),
+) -> None:
+    """Write/refresh workspace ``_index/`` MOCs at the vault root."""
+    from architectural_knowledge_db.services.obsidian_export import write_workspace_index
+
+    project_ids = _parse_projects_csv(projects)
+    with _conn() as conn:
+        root = _resolve_vault_root(conn, project_ids, vault_root)
+        result = write_workspace_index(conn, project_ids, root)
+    _print(result)
+
+
+@obsidian_app.command("verify-index")
+def obsidian_verify_index(
+    projects: str = typer.Option(..., "--projects", help="Comma-separated project ids."),
+    vault_root: Path | None = typer.Option(None, "--vault-root", help="Vault repo root (owns _index/)."),
+) -> None:
+    """Re-render ``_index/`` and byte-compare; exit 1 on drift."""
+    from architectural_knowledge_db.services.obsidian_export import verify_workspace_index
+
+    project_ids = _parse_projects_csv(projects)
+    with _conn() as conn:
+        root = _resolve_vault_root(conn, project_ids, vault_root)
+        result = verify_workspace_index(conn, project_ids, root)
+    _print(result)
+    if result["mismatched"] or result["missing"] or result["extra"]:
+        raise typer.Exit(code=1)
+
+
 def main() -> None:
     app()
 

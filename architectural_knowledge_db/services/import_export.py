@@ -1417,13 +1417,39 @@ class ImportExportService:
         namespace prefix for on-disk relative paths.
         """
         from architectural_knowledge_db.services.export_targets import ExportTargetsService
-        from architectural_knowledge_db.services.obsidian_export import expected_vault_files
+        from architectural_knowledge_db.services.obsidian_export import (
+            build_global_registry,
+            expected_vault_files,
+        )
+        from architectural_knowledge_db.services.workspace import WorkspaceService
 
         dest_root = ExportTargetsService(self.conn).resolve_dest_root(
             project_id, target["target_id"]
         )
         namespace = Path(dest_root).name
-        namespaced = expected_vault_files(self.conn, project_id, namespace)
+        # Cross-repo wikilinks (D3): register every project that already has an
+        # obsidian-vault target so names/paths resolve across namespaces.
+        workshop_ids = [project_id]
+        ets = ExportTargetsService(self.conn)
+        for row in self.conn.execute("SELECT DISTINCT project_id FROM export_targets").fetchall():
+            pid = row["project_id"] if isinstance(row, dict) or hasattr(row, "keys") else row[0]
+            pid = str(pid)
+            if pid == project_id:
+                continue
+            if any(
+                t.get("enabled") and t.get("layout") == "obsidian-vault"
+                for t in ets.list_targets(pid)
+            ):
+                workshop_ids.append(pid)
+        global_registry = build_global_registry(self.conn, workshop_ids)
+        workspace = WorkspaceService(self.conn)
+        namespaced = expected_vault_files(
+            self.conn,
+            project_id,
+            namespace,
+            workspace=workspace,
+            global_registry=global_registry,
+        )
         prefix = f"{namespace}/"
         expected: dict[str, bytes] = {}
         for rel, payload in namespaced.items():

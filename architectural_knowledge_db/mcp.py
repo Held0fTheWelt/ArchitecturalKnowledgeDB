@@ -1234,6 +1234,30 @@ MCP_MANIFEST: dict[str, Any] = {
             },
         },
         {
+            "name": "akdb_obsidian_build_index",
+            "description": "Write/refresh the vault-root _index/ workspace MOCs for the given project ids.",
+            "input_schema": {
+                "type": "object",
+                "required": ["project_ids", "vault_root"],
+                "properties": {
+                    "project_ids": {"type": "array", "items": {"type": "string"}},
+                    "vault_root": {"type": "string"},
+                },
+            },
+        },
+        {
+            "name": "akdb_obsidian_verify_index",
+            "description": "Re-render vault-root _index/ and byte-compare against committed files.",
+            "input_schema": {
+                "type": "object",
+                "required": ["project_ids", "vault_root"],
+                "properties": {
+                    "project_ids": {"type": "array", "items": {"type": "string"}},
+                    "vault_root": {"type": "string"},
+                },
+            },
+        },
+        {
             "name": "akdb_reingest_project",
             "description": "Rebuild a project's knowledge by re-importing ADRs, architecture documents, and UML from its source folders, then rescanning Git provenance. Use to refresh the DB state after sources change. Folders default to the standard repo layout under source_root (AKDB_SOURCE_ROOT); missing folders are skipped. Writes to the database (run against a DB the agent owns, or with the :8787 service stopped).",
             "input_schema": {
@@ -1447,6 +1471,18 @@ class McpDispatcher:
             return ImportExportService(self.conn).export_sync(arguments["project_id"], arguments["target_id"])
         if tool_name == "akdb_obsidian_verify":
             return ImportExportService(self.conn).verify_export(arguments["project_id"], arguments["target_id"])
+        if tool_name == "akdb_obsidian_build_index":
+            from architectural_knowledge_db.services.obsidian_export import write_workspace_index
+
+            return write_workspace_index(
+                self.conn, list(arguments["project_ids"]), arguments["vault_root"]
+            )
+        if tool_name == "akdb_obsidian_verify_index":
+            from architectural_knowledge_db.services.obsidian_export import verify_workspace_index
+
+            return verify_workspace_index(
+                self.conn, list(arguments["project_ids"]), arguments["vault_root"]
+            )
         if tool_name == "akdb_list_sads":
             return SadService(self.conn).list_documents(arguments["project_id"])
         if tool_name == "akdb_get_sad":

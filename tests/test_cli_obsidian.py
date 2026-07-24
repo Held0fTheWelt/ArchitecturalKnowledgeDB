@@ -94,3 +94,71 @@ def test_obsidian_verify_exit_code(tmp_path: Path, monkeypatch) -> None:
     note.write_text("tampered\n", encoding="utf-8", newline="")
     result = runner.invoke(app, ["obsidian", "verify", "p", "--target", "vault"])
     assert result.exit_code != 0
+
+
+def test_obsidian_build_and_verify_index(tmp_path: Path, monkeypatch) -> None:
+    dest = _seed_obsidian_project(tmp_path, monkeypatch)
+    vault_root = dest.parent
+
+    result = runner.invoke(
+        app,
+        [
+            "export",
+            "target-add",
+            "p",
+            "vault",
+            "--repo",
+            "Git",
+            "--dest",
+            str(dest),
+            "--layout",
+            "obsidian-vault",
+            "--kinds",
+            "sad,adr",
+            "--no-auto",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+
+    result = runner.invoke(
+        app,
+        [
+            "obsidian",
+            "build-index",
+            "--projects",
+            "p",
+            "--vault-root",
+            str(vault_root),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert (vault_root / "_index" / "START-HERE.md").is_file()
+    assert (vault_root / "_index" / "MOC — In Arbeit.md").is_file()
+
+    result = runner.invoke(
+        app,
+        [
+            "obsidian",
+            "verify-index",
+            "--projects",
+            "p",
+            "--vault-root",
+            str(vault_root),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+
+    # Corrupt an index page → verify-index must exit 1
+    (vault_root / "_index" / "START-HERE.md").write_text("tampered\n", encoding="utf-8")
+    result = runner.invoke(
+        app,
+        [
+            "obsidian",
+            "verify-index",
+            "--projects",
+            "p",
+            "--vault-root",
+            str(vault_root),
+        ],
+    )
+    assert result.exit_code != 0

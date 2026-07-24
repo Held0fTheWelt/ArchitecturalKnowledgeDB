@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable
 
 import yaml
@@ -896,3 +897,90 @@ def expected_vault_files(
         files[f"{namespace}/{moc_name}"] = moc_bytes
 
     return dict(sorted(files.items()))
+
+
+def write_workspace_index(
+    conn: Any,
+    project_ids: list[str],
+    vault_root: str | Path,
+    *,
+    namespaces: dict[str, str] | None = None,
+    workspace: Any | None = None,
+) -> dict[str, Any]:
+    """Materialize ``_index/`` under ``vault_root`` from ``build_workspace_index``."""
+    root = Path(vault_root)
+    registry = build_global_registry(conn, project_ids)
+    if workspace is None:
+        try:
+            from architectural_knowledge_db.services.workspace import WorkspaceService
+
+            workspace = WorkspaceService(conn)
+        except Exception:  # noqa: BLE001
+            workspace = None
+    files = build_workspace_index(
+        conn,
+        project_ids,
+        global_registry=registry,
+        workspace=workspace,
+        namespaces=namespaces,
+    )
+    written: list[str] = []
+    for rel, payload in files.items():
+        target = root.joinpath(*PurePosixPath(rel).parts)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not target.is_file() or target.read_bytes() != payload:
+            target.write_bytes(payload)
+        written.append(str(target))
+    return {"vault_root": str(root), "written": written, "files": sorted(files)}
+
+
+def verify_workspace_index(
+    conn: Any,
+    project_ids: list[str],
+    vault_root: str | Path,
+    *,
+    namespaces: dict[str, str] | None = None,
+    workspace: Any | None = None,
+) -> dict[str, Any]:
+    """Re-render ``_index/`` and byte-compare against files under ``vault_root``."""
+    root = Path(vault_root)
+    registry = build_global_registry(conn, project_ids)
+    if workspace is None:
+        try:
+            from architectural_knowledge_db.services.workspace import WorkspaceService
+
+            workspace = WorkspaceService(conn)
+        except Exception:  # noqa: BLE001
+            workspace = None
+    expected = build_workspace_index(
+        conn,
+        project_ids,
+        global_registry=registry,
+        workspace=workspace,
+        namespaces=namespaces,
+    )
+    actual: dict[str, Path] = {}
+    index_dir = root / "_index"
+    if index_dir.is_dir():
+        for path in index_dir.rglob("*"):
+            if path.is_file():
+                actual[path.relative_to(root).as_posix()] = path
+    matched = 0
+    mismatched: list[str] = []
+    for rel, payload in sorted(expected.items()):
+        path = actual.get(rel)
+        if path is None:
+            continue
+        if path.read_bytes() == payload:
+            matched += 1
+        else:
+            mismatched.append(rel)
+    missing = sorted(set(expected) - set(actual))
+    extra = sorted(set(actual) - set(expected))
+    return {
+        "vault_root": str(root),
+        "matched": matched,
+        "mismatched": mismatched,
+        "missing": missing,
+        "extra": extra,
+    }
