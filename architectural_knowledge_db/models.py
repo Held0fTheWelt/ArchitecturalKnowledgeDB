@@ -263,6 +263,23 @@ class SpecInput(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class ChangeItemInput(BaseModel):
+    spec_uid: str = ""
+    op: Literal["add", "modify", "supersede", "remove"]
+    target_kind: Literal[
+        "sad_decision",
+        "sad_section",
+        "adr",
+        "uml_element",
+        "uml_relationship",
+        "rule",
+        "definition",
+    ]
+    target_ref: str
+    state: Literal["proposed", "in_progress", "done"] = "proposed"
+    note: str | None = None
+
+
 class QuestionInput(BaseModel):
     question_id: str
     title: str
