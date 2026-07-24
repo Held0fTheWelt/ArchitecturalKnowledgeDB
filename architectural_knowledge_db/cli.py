@@ -1050,6 +1050,11 @@ def spec_ingest(
     file: Path = typer.Argument(..., help="Markdown file containing the spec body + Architektur-Impact section."),
 ) -> None:
     text = file.read_text(encoding="utf-8")
+    # Specs live under docs/superpowers/specs/** in TTD, which is outside the
+    # ttd-canon mirror root rules (docs/architecture|UML|docs/ADR). Remap the
+    # durable body into docs/architecture/specs/<filename> so promote/export
+    # keeps a byte-exact twin under _generated/specs/ after the source is git-rm'd.
+    mirror_key = f"docs/architecture/specs/{file.name}"
     with _conn() as conn:
         spec_uid = _resolve_spec_uid(conn, project, spec)
         knowledge = KnowledgeService(conn)
@@ -1058,8 +1063,10 @@ def spec_ingest(
         metadata = {
             **current.get("metadata", {}),
             "body_text": text,
-            "repo_source_key": repo_relative_key(file),
+            "body_encoding": "utf-8",
+            "repo_source_key": mirror_key,
             "source_key": file.name,
+            "source_path": repo_relative_key(file),
         }
         knowledge.upsert_spec(
             project,
@@ -1076,7 +1083,7 @@ def spec_ingest(
         )
         impact = ChangeSetService(conn).ingest_impact(project, spec_uid, text)
         status = AuthoringService(conn).set_spec_status(project, spec_uid, "ready")
-    _print({"impact": impact, "status": status})
+    _print({"impact": impact, "status": status, "repo_source_key": mirror_key})
 
 
 @work_app.command("open")

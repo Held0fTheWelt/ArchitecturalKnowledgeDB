@@ -37,6 +37,7 @@ def test_cli_work_open_and_change_set_state(tmp_path: Path, monkeypatch) -> None
 
     result = runner.invoke(app, ["spec", "ingest", "p", "S1", str(impact)])
     assert result.exit_code == 0, result.output
+    assert "docs/architecture/specs/impact.md" in result.output
 
     result = runner.invoke(app, ["work", "open", "p"])
     assert result.exit_code == 0, result.output
