@@ -12,6 +12,7 @@ from architectural_knowledge_db.db.connection import connect, initialize_databas
 from architectural_knowledge_db.mcp import MCP_MANIFEST, McpDispatcher
 from architectural_knowledge_db.models import (
     AdrInput,
+    CanonicalDocumentUpdate,
     ConsistencyCheckRequest,
     ContextPackRequest,
     DefinitionInput,
@@ -295,6 +296,19 @@ def create_app() -> FastAPI:
         exclude: list[str] | None = Query(default=None),
     ) -> dict[str, Any]:
         return _run(lambda: ImportExportService(conn).import_documents(project_id, folder, include, exclude))
+
+    @app.put("/projects/{project_id}/canon/document")
+    def update_canonical_document(
+        project_id: str,
+        request: CanonicalDocumentUpdate,
+        conn: Annotated[sqlite3.Connection, Depends(get_connection)],
+    ) -> dict[str, Any]:
+        return _run(
+            lambda: ImportExportService(conn).update_canonical_document(
+                project_id,
+                request,
+            )
+        )
 
     @app.post("/projects/{project_id}/exports/adrs")
     def export_adrs(

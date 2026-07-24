@@ -158,6 +158,13 @@ class SourceAreaInput(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class CanonicalDocumentUpdate(BaseModel):
+    repository_id: str
+    repo_source_key: str
+    body_text: str
+    body_encoding: Literal["utf-8", "utf-8-sig", "cp1252"] = "utf-8"
+
+
 class KnowledgeLinkInput(BaseModel):
     source_item_uid: str
     target_ref: str

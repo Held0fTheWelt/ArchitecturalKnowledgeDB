@@ -11,7 +11,7 @@ rectangle "Git scan / reingest" as Provenance
 rectangle "Deterministic export" as Export
 Root --> DB : D-DB
 Root --> Authoring : D-SAD
-Root --> Export : D-SoR / D-MULTI
+Root --> Export : D-SoR / D-MULTI / D-CANON-UPDATE
 Root --> Surfaces : D3
 Root --> Provenance : D4
 Child --> Authoring : D1-D8
@@ -24,6 +24,6 @@ Provenance --> DB
 DB --> Export
 note bottom
 Code: sad.py, uml.py, import_export.py, database.py, connection.py, cli.py, app.py, mcp.py.
-Tests: test_sad_authoring.py, test_uml.py, test_export_sad_cli.py, API/MCP and PostgreSQL suite.
+Tests: test_sad_authoring.py, test_uml.py, test_export_sad_cli.py, test_canonical_document_update.py, API/MCP and PostgreSQL suite.
 end note
 @enduml

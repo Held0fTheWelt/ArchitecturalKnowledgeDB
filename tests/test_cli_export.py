@@ -72,3 +72,60 @@ def test_export_target_add_list_sync_verify_round_trip(tmp_path: Path, monkeypat
     (dest / "plugins" / "X" / "architecture.md").write_text("tampered\n", encoding="utf-8", newline="")
     result = runner.invoke(app, ["export", "target-verify", "p", "--target", "m"])
     assert result.exit_code != 0
+
+
+def test_document_update_canonical_cli(tmp_path: Path, monkeypatch) -> None:
+    repo = _seed(tmp_path, monkeypatch)
+    result = runner.invoke(
+        app,
+        [
+            "repo",
+            "add",
+            "--project",
+            "p",
+            "--id",
+            "Git",
+            "--path",
+            str(repo),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    result = runner.invoke(
+        app,
+        [
+            "document",
+            "import",
+            "--project",
+            "p",
+            "--folder",
+            str(repo / "docs" / "architecture"),
+            "--include",
+            "**/*",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    body_file = tmp_path / "replacement.md"
+    body_file.write_text(
+        "# X\n\nDB-native CLI replacement.\n",
+        encoding="utf-8",
+        newline="",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "document",
+            "update-canonical",
+            "--project",
+            "p",
+            "--repository",
+            "Git",
+            "--source-key",
+            "docs/architecture/plugins/X/architecture.md",
+            "--body-file",
+            str(body_file),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert '"item_type": "sad"' in result.output

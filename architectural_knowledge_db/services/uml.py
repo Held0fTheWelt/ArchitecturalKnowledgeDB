@@ -316,6 +316,11 @@ class UMLService:
                 if changes.sad_document_id is not None
                 else (current.get("model") or {}).get("sad_document_id")
             )
+            current_repo_source_key = (current.get("model") or {}).get(
+                "repo_source_key"
+            )
+            if current_repo_source_key:
+                parsed["model"]["repo_source_key"] = current_repo_source_key
             parsed["model"]["authored_in"] = "akdb"
             return self.upsert_diagram(project_id, parsed)
 

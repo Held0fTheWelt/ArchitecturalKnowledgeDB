@@ -15,6 +15,7 @@ from architectural_knowledge_db.db.connection import initialize_database
 from architectural_knowledge_db.mcp import MCP_MANIFEST
 from architectural_knowledge_db.models import (
     AdrInput,
+    CanonicalDocumentUpdate,
     ContextPackRequest,
     DefinitionInput,
     KnowledgeSpace,
@@ -571,6 +572,36 @@ def import_documents(
 ) -> None:
     with _conn() as conn:
         _print(ImportExportService(conn).import_documents(project_id, folder, include or None, exclude or None))
+
+
+@document_app.command("update-canonical")
+def update_canonical_document(
+    project_id: str = typer.Option(..., "--project"),
+    repository_id: str = typer.Option(..., "--repository"),
+    source_key: str = typer.Option(..., "--source-key"),
+    body_file: Path | None = typer.Option(None, "--body-file"),
+    body: str | None = typer.Option(None, "--body"),
+    encoding: str = typer.Option("utf-8", "--encoding"),
+) -> None:
+    if (body_file is None) == (body is None):
+        raise typer.BadParameter("Provide exactly one of --body-file or --body.")
+    if body_file is not None:
+        with body_file.open("r", encoding=encoding, newline="") as handle:
+            body_text = handle.read()
+    else:
+        body_text = body or ""
+    with _conn() as conn:
+        _print(
+            ImportExportService(conn).update_canonical_document(
+                project_id,
+                CanonicalDocumentUpdate(
+                    repository_id=repository_id,
+                    repo_source_key=source_key,
+                    body_text=body_text,
+                    body_encoding=encoding,
+                ),
+            )
+        )
 
 
 @app.command("search")

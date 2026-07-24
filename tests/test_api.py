@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
 
 import pytest
 
@@ -116,3 +117,57 @@ def test_api_db_native_sad_and_uml_crud(tmp_path: Path, monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json()["source_uri"] == "akdb://p/uml/components"
     assert client.delete("/projects/p/uml/diagrams/components").status_code == 200
+
+
+def test_api_updates_existing_canonical_document_without_source_write(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv(
+        "AKDB_DATABASE_PATH",
+        str(tmp_path / "api-canonical-update.sqlite"),
+    )
+    client = TestClient(create_app())
+    repository = tmp_path / "repo"
+    source = (
+        repository
+        / "docs"
+        / "architecture"
+        / "plugins"
+        / "Example"
+        / "architecture.md"
+    )
+    source.parent.mkdir(parents=True)
+    source.write_text("# Example\n\nOriginal.\n", encoding="utf-8", newline="")
+    subprocess.run(["git", "init", "-q"], cwd=repository, check=True)
+
+    assert client.post(
+        "/projects",
+        json={"project_id": "p", "display_name": "P"},
+    ).status_code == 200
+    assert client.post(
+        "/projects/p/repositories",
+        json={"repository_id": "Git", "local_path": str(repository)},
+    ).status_code == 200
+    assert client.post(
+        "/projects/p/imports/documents",
+        params={
+            "folder": str(repository / "docs" / "architecture"),
+            "include": "**/*",
+        },
+    ).status_code == 200
+
+    replacement = "# Example\n\nDB-native API replacement.\n"
+    response = client.put(
+        "/projects/p/canon/document",
+        json={
+            "repository_id": "Git",
+            "repo_source_key": (
+                "docs/architecture/plugins/Example/architecture.md"
+            ),
+            "body_text": replacement,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["item_type"] == "sad"
+    assert source.read_text(encoding="utf-8") == "# Example\n\nOriginal.\n"

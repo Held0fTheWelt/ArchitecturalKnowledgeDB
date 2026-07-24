@@ -11,6 +11,7 @@
     "UML/flow/architectural-knowledge-db-main-activity.puml",
     "UML/sequence/architectural-knowledge-db-primary-sequence.puml",
     "UML/sequence/architectural-knowledge-db-website-projection-sequence.puml",
+    "UML/sequence/canonical-document-update-sequence.puml",
     "UML/sequence/postgres-request-sequence.puml",
     "UML/sequence/sad-authoring-export-sequence.puml",
     "UML/states/architecture-document-lifecycle.puml",

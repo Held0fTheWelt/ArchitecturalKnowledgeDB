@@ -57,6 +57,15 @@ akdb uml import --project my-project --folder docs/architecture/uml
 
 Document import recognizes Markdown plus structured architecture files such as YAML, JSON, CSV, contracts, evidence reports, schemas, and project facts. ADR import preserves domain IDs and skips catalog/template files that are not real ADR records.
 
+After a corpus transfers authority to AKDB, do not recreate a retired source tree merely to edit one
+file. Update the existing canonical body by stable identity:
+
+```powershell
+akdb document update-canonical --project my-project --repository main --source-key docs/architecture/project/system/architecture.md --body-file updated-architecture.md
+```
+
+AKDB rejects unsafe, missing, or ambiguous identities and reconciles derived SAD, ADR, and UML state.
+
 ## Author SAD And UML In AKDB
 
 Create a root SAD and structured children:

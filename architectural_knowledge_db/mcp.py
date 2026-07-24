@@ -5,6 +5,7 @@ from typing import Any
 
 from architectural_knowledge_db.models import (
     AdrInput,
+    CanonicalDocumentUpdate,
     ContextPackRequest,
     ExploreRequest,
     OriginExplainRequest,
@@ -1123,6 +1124,30 @@ MCP_MANIFEST: dict[str, Any] = {
             },
         },
         {
+            "name": "akdb_update_canonical_document",
+            "description": "Update one existing DB-canonical document body without recreating a source file; reconciles links, imported SAD children, and matching structured ADR/UML state.",
+            "input_schema": {
+                "type": "object",
+                "required": [
+                    "project_id",
+                    "repository_id",
+                    "repo_source_key",
+                    "body_text",
+                ],
+                "properties": {
+                    "project_id": {"type": "string"},
+                    "repository_id": {"type": "string"},
+                    "repo_source_key": {"type": "string"},
+                    "body_text": {"type": "string"},
+                    "body_encoding": {
+                        "type": "string",
+                        "enum": ["utf-8", "utf-8-sig", "cp1252"],
+                        "default": "utf-8",
+                    },
+                },
+            },
+        },
+        {
             "name": "akdb_export_flush",
             "description": "Drain a target's dirty queue, writing/deleting only changed mirror files (fast, incremental).",
             "input_schema": {
@@ -1331,6 +1356,17 @@ class McpDispatcher:
             return ImportExportService(self.conn).export_canon(arguments["project_id"], arguments["folder"])
         if tool_name == "akdb_verify_canon":
             return ImportExportService(self.conn).verify_canon(arguments["project_id"], arguments["folder"])
+        if tool_name == "akdb_update_canonical_document":
+            project_id = arguments["project_id"]
+            payload = {
+                key: value
+                for key, value in arguments.items()
+                if key != "project_id"
+            }
+            return ImportExportService(self.conn).update_canonical_document(
+                project_id,
+                CanonicalDocumentUpdate(**payload),
+            )
         if tool_name == "akdb_export_flush":
             return ImportExportService(self.conn).export_incremental(arguments["project_id"], arguments["target_id"])
         if tool_name == "akdb_verify_export":

@@ -85,6 +85,8 @@ Use the same `mcpServers` JSON block as Cursor, in that client's config location
 
 **Refresh the DB yourself.** `akdb_reingest_project` rebuilds a project's knowledge from its source folders, then rescans Git provenance. It defaults to the standard layout under `AKDB_SOURCE_ROOT`. It writes to the database, so run it against a DB the agent owns, or stop the `:8787` service first. SQLite has one writer; a shared DB held by the service cannot be overwritten safely.
 
+**Maintain a DB-owned imported canon.** `akdb_update_canonical_document` replaces the complete body of one existing `repo_source_key` without recreating a source file. It requires a registered repository and reconciles stale links, imported SAD children, and matching ADR/UML structure before the normal target export runs.
+
 **Conflict-aware planning.** `architectural_knowledge_db_validate_task_context` returns `review` for an explicit forbidden-change hit, `review_advised` with relevant ADRs/guardrails when a normative decision governs the task, or `no_known_conflict` otherwise.
 
 **After registering, restart the client.** MCP servers are loaded at client startup.

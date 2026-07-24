@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -7,12 +8,17 @@ from architectural_knowledge_db.mcp import McpDispatcher
 from architectural_knowledge_db.services.export_targets import ExportTargetsService
 from architectural_knowledge_db.services.import_export import ImportExportService
 from architectural_knowledge_db.services.projects import ProjectService
-from architectural_knowledge_db.models import ProjectUpsert
+from architectural_knowledge_db.services.repositories import RepositoryService
+from architectural_knowledge_db.models import ProjectUpsert, RepositoryRegistration
 
 
 def _seed(conn, tmp_path):
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     ProjectService(conn).upsert_project(ProjectUpsert(project_id="p", display_name="P"))
+    RepositoryService(conn).register_repository(
+        "p",
+        RepositoryRegistration(repository_id="Git", local_path=str(tmp_path)),
+    )
     tree = tmp_path / "docs" / "architecture" / "plugins" / "X"
     tree.mkdir(parents=True)
     (tree / "architecture.md").write_text("# X\n\n## 1. Intro\n\nbody\n", encoding="utf-8", newline="")
@@ -44,3 +50,31 @@ def test_akdb_export_flush_tool(conn, tmp_path):
     result = McpDispatcher(conn).dispatch("akdb_export_flush", {"project_id": "p", "target_id": "m"})
     assert any("architecture.md" in w for w in result["written"])
     assert (dest / "plugins" / "X" / "architecture.md").is_file()
+
+
+def test_akdb_update_canonical_document_tool(conn, tmp_path):
+    _seed(conn, tmp_path)
+    body = "# X\n\n## 1. Intro\n\nDB-native replacement.\n"
+
+    result = McpDispatcher(conn).dispatch(
+        "akdb_update_canonical_document",
+        {
+            "project_id": "p",
+            "repository_id": "Git",
+            "repo_source_key": "docs/architecture/plugins/X/architecture.md",
+            "body_text": body,
+        },
+    )
+
+    assert result["repo_source_key"] == (
+        "docs/architecture/plugins/X/architecture.md"
+    )
+    owner = conn.execute(
+        """
+        SELECT metadata_json
+        FROM knowledge_items
+        WHERE item_uid = ?
+        """,
+        (result["item_uid"],),
+    ).fetchone()
+    assert json.loads(owner["metadata_json"])["body_text"] == body

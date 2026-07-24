@@ -82,7 +82,7 @@ See [C4 container](UML/components/c4-container.puml), [C4 component](UML/compone
 | CLI / FastAPI / MCP | Human, HTTP, and agent entry points. | `cli.py`, `api/app.py`, `mcp.py`, `mcp_stdio.py` |
 | SadService | SAD document/section/decision lifecycle and `akdb://` provenance. | `services/sad.py` |
 | UMLService | Diagram/element/relationship CRUD, parsing, rendering, export. | `services/uml.py` |
-| ImportExportService | External imports, corpus export, hierarchical multi-SAD export. | `services/import_export.py` |
+| ImportExportService | External imports, validated DB-native updates of existing canonical bodies with derived SAD/ADR/UML reconciliation, corpus export, and hierarchical multi-SAD export. | `services/import_export.py` |
 | KnowledgeService | Item identity, authority, FTS, links, definitions, rules, ADRs. | `services/knowledge.py` |
 | Project/Repository | Projects, spaces, repositories, source-root resolution. | `projects.py`, `repositories.py` |
 | Search/Context/Recall | FTS, context packs, optional vectors, graph exploration. | `search.py`, `context.py`, `recall_backend.py` |
@@ -126,6 +126,10 @@ Incremental export, full synchronization, and freshness verification all ask `Ex
 
 Imported document bodies retain links relative to their canonical `repo_source_key`. During verification, incremental export, and full synchronization, Markdown links outside fenced examples are projected to the target layout: links to exported SAD, ADR, or UML artifacts point to their mirror locations; links to non-exported repository or adjacent-workspace artifacts are rebased from their canonical relative locations when the target is repository-relative. External URLs, fragments, and explicit repository-root references remain unchanged. Exactly one knowledge item may own `body_text` for a `repo_source_key`; derived structured records may share the key but cannot compete as export payloads.
 
+### 6.9 DB-native update of an imported canonical document
+
+A client submits a registered repository id, safe existing `repo_source_key`, complete body, and supported encoding through CLI, API, or MCP. `ImportExportService` requires exactly one body owner and preserves its stable identity. Within one deferred-export transaction it replaces stale outgoing links, deletes and rebuilds imported SAD children, updates structured ADR fields or the exactly matching structured UML model, marks the canonical path dirty, and lets the regular target projector publish the result. Absolute, traversing, missing, ambiguous, reclassified, or structurally unmatched requests fail before a mirror is accepted as current. See [canonical document update sequence](UML/sequence/canonical-document-update-sequence.puml).
+
 ## 7. Deployment View
 
 See [dual-backend deployment](UML/deployment/dual-backend-deployment.puml).
@@ -155,6 +159,8 @@ Portable export targets store a repository id plus a repository-relative destina
 - **Projection-safe references:** canonical Markdown retains repository-relative intent; the export layer rebases local links against the mirror layout without changing the stored body or fenced examples.
 - **Single body owner:** one and only one item with `body_text` supplies each `repo_source_key`; structured derivatives are never selected nondeterministically as file payloads.
 - **Public boundary:** only AKDB-owned architecture is exported here.
+- **Canonical mutation:** imported canonical bodies are updated by stable `repo_source_key`, never by reviving a retired source file or editing a generated mirror.
+- **Derivative reconciliation:** a canonical update replaces stale links and SAD children, and synchronizes the matching structured ADR or UML record transactionally.
 
 ## 9. Architecture Decisions
 
@@ -171,6 +177,7 @@ Portable export targets store a repository id plus a repository-relative destina
 | D-MULTI | Root and subsystem SADs export hierarchically | Accepted |
 | D-EXPORT | Relative export destinations are repository-bound and fail closed | Accepted |
 | D-PROJECTION | Target mirrors rebase canonical links and require one body owner | Accepted |
+| D-CANON-UPDATE | Existing canonical documents update by stable DB identity | Accepted |
 
 ### D1: Active standalone Outer Tool classification
 
@@ -238,6 +245,12 @@ Export targets bind a destination to a registered repository. Existing registere
 
 Canonical document bodies retain repository-source link semantics. Verification, incremental export, and full synchronization apply the same target-specific Markdown projection. Exportable SAD/ADR/UML links resolve inside the mirror; non-exported repository and adjacent-workspace artifacts resolve from their canonical relative locations when possible. Fenced examples, external URLs, fragments, and explicit repository-root references are unchanged. Multiple `body_text` owners for one `repo_source_key` are rejected. See [ADR-AKDB-0003](../adr/adr-akdb-0003-project-canonical-links-into-target-mirrors.md).
 
+### D-CANON-UPDATE: Existing canonical documents update by stable DB identity
+
+**Status:** Accepted
+
+An existing imported canonical body is mutated only through the validated canonical-document update operation. The operation requires a registered repository and one body owner, preserves the owner UID, reconciles links and imported SAD children, synchronizes structured ADR/UML state, and reaches publication through the normal dirty-target export path. Generated files and retired source paths are never used as an authoring authority. See [ADR-AKDB-0004](../adr/adr-akdb-0004-update-imported-canonical-documents-by-stable-db-identity.md).
+
 ## 10. Quality Requirements
 
 | Quality | Scenario | Evidence |
@@ -250,6 +263,8 @@ Canonical document bodies retain repository-source link semantics. Verification,
 | Export boundary safety | A relative mirror resolves to its registered repository; an unrelated checkout is rejected before writes. | `tests/services/test_export_targets.py`, export sync/verify tests |
 | Projection integrity | Full sync, incremental export, and verification derive identical target-relative Markdown links from canonical source paths; fenced examples remain verbatim. | `tests/services/test_export_sync.py` |
 | Canonical payload uniqueness | Ambiguous `body_text` owners fail instead of making row-order-dependent output. | export sync/incremental tests |
+| Canonical mutation safety | An existing imported body changes without writing a source file; traversal, missing owners, and ambiguity fail closed. | `tests/services/test_canonical_document_update.py`, CLI/API/MCP tests |
+| Derivative consistency | Removed SAD decisions and links disappear; ADR fields and structured UML raw source equal the new canonical body. | canonical-document-update service tests |
 | Provenance | Self uses `akdb://`; imports retain origins. | authoring tests |
 | Agent compatibility | MCP authoring and retrieval tools dispatch consistently. | MCP tests |
 
@@ -266,6 +281,7 @@ Canonical document bodies retain repository-source link semantics. Verification,
 | Unavailable repository registration | Portable snapshot export cannot resolve its destination. | Fail closed; restore a valid registration path or run in a checkout with the registered sanitized remote. |
 | Absolute external export target | A target outside the registered repository has no provable path back to non-mirrored repository files. | Preserve unresolved source links; prefer repository-relative targets for complete projections. |
 | Unsupported Markdown link syntax | Reference definitions or unusual inline syntax may not be projected. | Keep projection parser deliberately narrow, test observed syntax, and fail link gates on unresolved targets. |
+| Canonical update parser failure or unsupported derived format | Body and structured records could diverge. | Validate before commit, require exactly one structured UML match, execute transactionally, and verify the target mirror after update. |
 | Generated file edits | Changes vanish. | README warning and deterministic CI gate. |
 
 ## 12. Glossary

@@ -104,6 +104,16 @@ Use `sad list/get` and `uml list/get` to inspect the canonical records. The equi
 routes and `akdb_*` MCP tools use the same services. File import remains available for projects
 whose authority still lives outside AKDB; do not import an AKDB-owned export back as an editing loop.
 
+When an imported corpus has transferred authority to AKDB, update an existing canonical body by its
+stable repository path. This preserves the body owner and reconciles derived SAD, ADR, and UML state:
+
+```powershell
+akdb document update-canonical --project my-project --repository main --source-key docs/architecture/project/system/architecture.md --body-file updated-architecture.md
+```
+
+The equivalent FastAPI route and `akdb_update_canonical_document` MCP tool accept the complete body
+directly. The operation never writes the retired source path or generated mirror.
+
 ## Self-documentation
 
 `docs/architecture` (the root arc42 SAD, subsystem SADs, and their associated `UML/` trees) is

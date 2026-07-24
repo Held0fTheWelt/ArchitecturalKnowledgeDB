@@ -11,7 +11,15 @@ from typing import Any
 from urllib.parse import unquote, urlsplit, urlunsplit
 
 from architectural_knowledge_db.config import auto_export_root_for_database
-from architectural_knowledge_db.models import AdrInput, DefinitionInput, KnowledgeLinkInput, RuleInput, SourceAreaInput
+from architectural_knowledge_db.models import (
+    AdrInput,
+    CanonicalDocumentUpdate,
+    DefinitionInput,
+    KnowledgeLinkInput,
+    RuleInput,
+    SourceAreaInput,
+    UMLDiagramUpdate,
+)
 from architectural_knowledge_db.services.knowledge import KnowledgeService
 
 
@@ -467,6 +475,277 @@ class ImportExportService:
                 for item in derived
             ],
         })
+
+    def update_canonical_document(
+        self,
+        project_id: str,
+        request: CanonicalDocumentUpdate,
+    ) -> dict[str, Any]:
+        """Update one existing DB-canonical file without recreating a source file.
+
+        The operation preserves the canonical body's stable knowledge-item
+        identity, replaces stale links and imported SAD children, and keeps a
+        matching structured ADR or UML record synchronized in the same
+        transaction.
+        """
+        from architectural_knowledge_db.services.export_flush import deferred_export
+        from architectural_knowledge_db.services.repositories import RepositoryService
+        from architectural_knowledge_db.services.uml import UMLService
+
+        repo_key = _safe_repo_source_key(request.repo_source_key)
+        repository = RepositoryService(self.conn).get_repository(
+            project_id,
+            request.repository_id,
+        )
+        repository_root = Path(repository["local_path"]).expanduser().resolve()
+        if not repository_root.is_dir():
+            raise ValueError(
+                f"Registered repository path does not exist: {repository_root}"
+            )
+        virtual_path = repository_root.joinpath(*PurePosixPath(repo_key).parts)
+        owners = self._body_owner_rows(project_id, repo_key)
+        if not owners:
+            raise ValueError(
+                f"Canonical document does not exist for repo_source_key {repo_key}"
+            )
+        if len(owners) > 1:
+            owner_ids = ", ".join(row["item_uid"] for row in owners)
+            raise ValueError(
+                "Multiple canonical body_text owners for repo_source_key "
+                f"{repo_key}: {owner_ids}"
+            )
+
+        owner = self.knowledge.get_item_by_uid(owners[0]["item_uid"])
+        metadata = owner.get("metadata") or {}
+        source_key = metadata.get("source_key") or repo_key
+        source_uri = f"akdb://{project_id}/canon/{repo_key}"
+        text = request.body_text
+        document = parse_document_file(
+            virtual_path,
+            text,
+            source_uri=source_uri,
+            source_key=source_key,
+        )
+        classification = classify_document(source_key, virtual_path, document)
+        is_adr = owner["item_type"] == "adr"
+        if not is_adr and classification["item_type"] != owner["item_type"]:
+            raise ValueError(
+                "Canonical update would change item classification from "
+                f"{owner['item_type']} to {classification['item_type']}"
+            )
+
+        with deferred_export(self.conn):
+            if is_adr:
+                updated = self._update_canonical_adr(
+                    project_id,
+                    owner,
+                    repo_key,
+                    source_key,
+                    source_uri,
+                    virtual_path,
+                    request,
+                )
+                derived: list[dict[str, Any]] = []
+            else:
+                self._delete_outgoing_links(owner["item_uid"])
+                self._delete_imported_sad_children(owner["item_uid"])
+                updated_metadata = {
+                    **metadata,
+                    **document.get("metadata", {}),
+                    "source_key": source_key,
+                    "repo_source_key": repo_key,
+                    "format": document["format"],
+                    "doc_kind": classification["doc_kind"],
+                    "body_text": text,
+                    "body_encoding": request.body_encoding,
+                    "headings": document.get("headings", []),
+                    "authored_in": "akdb",
+                }
+                item_uid = self.knowledge._upsert_item(
+                    project_id=project_id,
+                    space_id=owner["space_id"],
+                    item_type=owner["item_type"],
+                    local_id=owner["local_id"],
+                    title=document["title"],
+                    status=classification["status"],
+                    authority_level=classification["authority_level"],
+                    summary=document["summary"],
+                    source_uri=source_uri,
+                    metadata=updated_metadata,
+                )
+                self.knowledge._index_item(item_uid)
+                updated = self.knowledge.get_item_by_uid(item_uid)
+                self._link_document(
+                    updated,
+                    virtual_path,
+                    repository_root,
+                    text,
+                    document,
+                )
+                derived = self._import_derived_architecture_records(
+                    project_id,
+                    updated,
+                    virtual_path,
+                    repository_root,
+                    text,
+                    document,
+                )
+
+            uml = self._update_matching_structured_uml(
+                project_id,
+                repo_key,
+                text,
+                UMLService(self.conn),
+            )
+
+        return self._with_auto_export(
+            project_id,
+            {
+                "project_id": project_id,
+                "repository_id": request.repository_id,
+                "repo_source_key": repo_key,
+                "item_uid": updated["item_uid"],
+                "item_type": updated["item_type"],
+                "derived_records": len(derived),
+                "structured_uml_updated": uml,
+            },
+        )
+
+    def _body_owner_rows(
+        self,
+        project_id: str,
+        repo_source_key: str,
+    ) -> list[sqlite3.Row]:
+        return self.conn.execute(
+            """
+            SELECT item_uid, metadata_json
+            FROM knowledge_items
+            WHERE project_id = ?
+              AND json_extract(metadata_json, '$.repo_source_key') = ?
+              AND json_extract(metadata_json, '$.body_text') IS NOT NULL
+            ORDER BY item_uid
+            """,
+            (project_id, repo_source_key),
+        ).fetchall()
+
+    def _delete_outgoing_links(self, item_uid: str) -> None:
+        self.conn.execute(
+            "DELETE FROM knowledge_links WHERE source_item_uid = ?",
+            (item_uid,),
+        )
+
+    def _delete_imported_sad_children(self, parent_item_uid: str) -> None:
+        children = self.conn.execute(
+            """
+            SELECT item_uid
+            FROM knowledge_items
+            WHERE item_type IN (
+                'sad_frontmatter', 'sad_preamble', 'sad_section', 'sad_decision'
+            )
+              AND json_extract(metadata_json, '$.parent_item_uid') = ?
+            """,
+            (parent_item_uid,),
+        ).fetchall()
+        for child in children:
+            self.conn.execute(
+                "DELETE FROM knowledge_links WHERE source_item_uid = ?",
+                (child["item_uid"],),
+            )
+            self.conn.execute(
+                "DELETE FROM fts_knowledge WHERE item_uid = ?",
+                (child["item_uid"],),
+            )
+            self.conn.execute(
+                "DELETE FROM knowledge_items WHERE item_uid = ?",
+                (child["item_uid"],),
+            )
+
+    def _update_canonical_adr(
+        self,
+        project_id: str,
+        owner: dict[str, Any],
+        repo_key: str,
+        source_key: str,
+        source_uri: str,
+        virtual_path: Path,
+        request: CanonicalDocumentUpdate,
+    ) -> dict[str, Any]:
+        parsed = parse_adr_markdown(
+            request.body_text,
+            source_uri=source_uri,
+            source_key=source_key,
+        )
+        if parsed.adr_id != owner["local_id"]:
+            raise ValueError(
+                "Canonical ADR update would change identity from "
+                f"{owner['local_id']} to {parsed.adr_id}"
+            )
+        self._delete_outgoing_links(owner["item_uid"])
+        parsed.metadata.update(
+            {
+                **(owner.get("metadata") or {}),
+                "source_key": source_key,
+                "repo_source_key": repo_key,
+                "body_text": request.body_text,
+                "body_encoding": request.body_encoding,
+                "authored_in": "akdb",
+            }
+        )
+        updated = self.knowledge.upsert_adr(
+            project_id,
+            parsed,
+            space_id=owner["space_id"],
+        )
+        self._link_targets(
+            project_id,
+            updated["item_uid"],
+            _markdown_link_targets(request.body_text, virtual_path),
+            evidence=f"canonical ADR update {repo_key}",
+        )
+        return updated
+
+    def _update_matching_structured_uml(
+        self,
+        project_id: str,
+        repo_key: str,
+        body_text: str,
+        uml_service: Any,
+    ) -> bool:
+        if PurePosixPath(repo_key).suffix.lower() not in {".puml", ".mmd"}:
+            return False
+        rows = self.conn.execute(
+            """
+            SELECT diagram_id
+            FROM uml_diagrams
+            WHERE project_id = ?
+              AND (
+                  json_extract(model_json, '$.repo_source_key') = ?
+                  OR json_extract(model_json, '$.source_key') = ?
+              )
+            ORDER BY diagram_id
+            """,
+            (project_id, repo_key, repo_key),
+        ).fetchall()
+        if len(rows) != 1:
+            raise ValueError(
+                f"Canonical UML update requires exactly one structured diagram for {repo_key}; "
+                f"found {len(rows)}"
+            )
+        current = uml_service.get_diagram(project_id, rows[0]["diagram_id"])
+        model = current.get("model") or {}
+        uml_service.update_diagram(
+            project_id,
+            current["diagram_id"],
+            UMLDiagramUpdate(
+                title=current["title"],
+                notation=current["notation"],
+                diagram_kind=current["diagram_kind"],
+                source_key=model.get("source_key") or repo_key,
+                sad_document_id=model.get("sad_document_id"),
+                raw_source=body_text,
+            ),
+        )
+        return True
 
     def import_rules(self, project_id: str, path: str | Path) -> dict[str, Any]:
         records = _records_from_file(path)
@@ -1812,6 +2091,21 @@ def repo_relative_key(path: Path) -> str:
         except ValueError:
             pass
     return resolved.as_posix()
+
+
+def _safe_repo_source_key(value: str) -> str:
+    normalized = str(value or "").strip().replace("\\", "/")
+    candidate = PurePosixPath(normalized)
+    if (
+        not normalized
+        or candidate.is_absolute()
+        or any(part in {"", ".", ".."} for part in candidate.parts)
+        or any(":" in part for part in candidate.parts)
+    ):
+        raise ValueError(
+            "repo_source_key must be a safe repository-relative path without traversal"
+        )
+    return candidate.as_posix()
 
 
 def find_repository_root(path: Path) -> Path | None:

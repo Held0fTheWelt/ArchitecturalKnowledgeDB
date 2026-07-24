@@ -1,0 +1,38 @@
+@startuml akdb-canonical-document-update
+title AKDB - Canonical Document Update
+actor Maintainer
+participant "CLI / API / MCP" as Surface
+participant ImportExportService as Canon
+participant RepositoryService as Repositories
+participant SadParser
+participant UMLService
+participant KnowledgeService as Knowledge
+participant ExportTargetsService as Targets
+database "Database facade" as DB
+participant "Generated target mirror" as Mirror
+Maintainer -> Surface : update(project, repository, repo_source_key, body)
+Surface -> Canon : CanonicalDocumentUpdate
+Canon -> Repositories : require registered repository
+Repositories --> Canon : existing local root
+Canon -> Canon : reject absolute/traversing source key
+Canon -> DB : find body_text owner by repo_source_key
+alt owner missing or ambiguous
+ Canon --> Maintainer : fail closed
+else exactly one owner
+ Canon -> Canon : parse body and verify classification
+ alt imported SAD
+  Canon -> DB : remove stale links and SAD children
+  Canon -> SadParser : parse current preamble/sections/decisions
+  SadParser -> Knowledge : rebuild derived records
+ else imported ADR
+  Canon -> Knowledge : replace structured ADR and body atomically
+ else PlantUML or Mermaid
+  Canon -> UMLService : require exactly one structured source match
+  UMLService -> DB : replace raw source and parsed model
+ end
+ Canon -> Knowledge : preserve owner UID; store akdb:// provenance
+ Knowledge -> Targets : mark canonical path dirty
+ Targets -> Mirror : incremental target-specific projection
+ Canon --> Maintainer : owner, derivative, and UML update result
+end
+@enduml
