@@ -97,7 +97,16 @@ class WorkspaceService:
             meta = self.conn.execute(
                 "SELECT head_sha FROM repository_inventory_meta WHERE repository_id = ?", (repo_id,)
             ).fetchone()
-            entry["sha"] = meta["head_sha"] if meta else None
+            scanned_sha = meta["head_sha"] if meta else None
+            try:
+                repository = self.repositories.get_repository(project_id, repo_id)
+            except ValueError:
+                live_sha = None
+            else:
+                live_sha = _git_head(
+                    resolve_local_path_alias(repository["local_path"])
+                )
+            entry["sha"] = live_sha or scanned_sha
         manifest = {"format_version": 1, "project_id": project_id, "repositories": repos}
         target = Path(folder)
         target.parent.mkdir(parents=True, exist_ok=True)
