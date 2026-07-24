@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any
 
 from architectural_knowledge_db.models import AdrInput, ChangeItemInput, SadDecisionInput
@@ -261,7 +262,35 @@ class ChangeSetService:
             self.set_item_state(project_id, item["id"], "done")
 
         spec_result = AuthoringService(self.conn).set_spec_status(project_id, spec_uid, "implemented")
+        self._sync_pending_exports(project_id)
         return {"promoted": promoted, "spec": spec_result["spec"]}
+
+    def _sync_pending_exports(self, project_id: str) -> None:
+        """Refresh the `_pending/` mirror on every auto-export target after a promote.
+
+        Status-bearing promotions (adr/sad_decision) already dirty + auto-flush
+        their target via KnowledgeService._upsert_item()'s write choke point
+        (notify_item_write), which happens to also refresh `_pending/` as a
+        side effect of export_incremental. Presence-only promotions (rule,
+        definition, uml_element/relationship add|modify — verified present,
+        no re-upsert) touch nothing there, so without this call a spec that
+        just closed via one of those kinds would leave its now-stale
+        `_pending/<spec_id>.md` un-pruned until an unrelated export ran.
+        `_sync_pending_view` is a full-but-cheap recompute (spec §8/D7), so
+        calling it unconditionally here is safe even when the status-bearing
+        path already covered it.
+        """
+        from architectural_knowledge_db.services.export_targets import ExportTargetsService
+        from architectural_knowledge_db.services.import_export import ImportExportService
+
+        targets = ExportTargetsService(self.conn).list_targets(project_id, enabled_only=True)
+        if not targets:
+            return
+        ies = ImportExportService(self.conn)
+        for target in targets:
+            if not target.get("auto_export"):
+                continue
+            ies._sync_pending_view(project_id, Path(target["dest_root"]))
 
     def _resolve_target(self, project_id: str, item: dict[str, Any]) -> Any:
         kind = item["target_kind"]

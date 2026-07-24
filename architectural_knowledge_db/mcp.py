@@ -21,6 +21,7 @@ from architectural_knowledge_db.models import (
     UMLRelationshipUpdate,
 )
 from architectural_knowledge_db.services.authoring import AuthoringService
+from architectural_knowledge_db.services.change_sets import ChangeSetService
 from architectural_knowledge_db.services.cognition import CognitionService
 from architectural_knowledge_db.services.completeness import CompletenessService
 from architectural_knowledge_db.services.consistency import ConsistencyService
@@ -899,6 +900,75 @@ MCP_MANIFEST: dict[str, Any] = {
             },
         },
         {
+            "name": "akdb_ingest_impact",
+            "description": "Parse a spec's `## Architektur-Impact` bullets into change_items (idempotent upsert on op/kind/ref).",
+            "input_schema": {
+                "type": "object",
+                "required": ["project_id", "spec_uid", "markdown"],
+                "properties": {
+                    "project_id": {"type": "string"},
+                    "spec_uid": {"type": "string"},
+                    "markdown": {"type": "string"},
+                },
+            },
+        },
+        {
+            "name": "akdb_open_work_orders",
+            "description": "List every spec with at least one non-done change_item, with open/in_progress/done counts.",
+            "input_schema": {
+                "type": "object",
+                "required": ["project_id"],
+                "properties": {"project_id": {"type": "string"}},
+            },
+        },
+        {
+            "name": "akdb_plan_basis",
+            "description": "Merge a spec's change_items with its spec_to_plan file-tasks/checkpoints — deterministic planner input.",
+            "input_schema": {
+                "type": "object",
+                "required": ["project_id", "spec_uid"],
+                "properties": {"project_id": {"type": "string"}, "spec_uid": {"type": "string"}},
+            },
+        },
+        {
+            "name": "akdb_set_change_state",
+            "description": "Transition a single change_item's state (proposed | in_progress | done).",
+            "input_schema": {
+                "type": "object",
+                "required": ["project_id", "change_item_id", "state"],
+                "properties": {
+                    "project_id": {"type": "string"},
+                    "change_item_id": {"type": "integer"},
+                    "state": {"type": "string", "enum": ["proposed", "in_progress", "done"]},
+                },
+            },
+        },
+        {
+            "name": "akdb_promote",
+            "description": "Reconcile a spec's change_items into the Ist: status-flip for adr/sad_decision, presence-verify (+ delete on supersede/remove) for the rest. Refuses on open items or an absent target unless force=true.",
+            "input_schema": {
+                "type": "object",
+                "required": ["project_id", "spec_uid"],
+                "properties": {
+                    "project_id": {"type": "string"},
+                    "spec_uid": {"type": "string"},
+                    "force": {"type": "boolean", "default": False},
+                },
+            },
+        },
+        {
+            "name": "akdb_render_pending",
+            "description": "Render the synthetic `_pending/<spec_id>.md` mirror view for every spec with open change_items under target_dest_root.",
+            "input_schema": {
+                "type": "object",
+                "required": ["project_id", "target_dest_root"],
+                "properties": {
+                    "project_id": {"type": "string"},
+                    "target_dest_root": {"type": "string"},
+                },
+            },
+        },
+        {
             "name": "akdb_connect",
             "description": "Find and explain the shortest knowledge-graph path between two items.",
             "input_schema": {
@@ -1450,6 +1520,26 @@ class McpDispatcher:
             )
         if tool_name == "akdb_spec_to_plan":
             return AuthoringService(self.conn).spec_to_plan(arguments["project_id"], arguments["spec_uid"])
+        if tool_name == "akdb_ingest_impact":
+            return ChangeSetService(self.conn).ingest_impact(
+                arguments["project_id"], arguments["spec_uid"], arguments["markdown"]
+            )
+        if tool_name == "akdb_open_work_orders":
+            return ChangeSetService(self.conn).open_work_orders(arguments["project_id"])
+        if tool_name == "akdb_plan_basis":
+            return ChangeSetService(self.conn).plan_basis(arguments["project_id"], arguments["spec_uid"])
+        if tool_name == "akdb_set_change_state":
+            return ChangeSetService(self.conn).set_item_state(
+                arguments["project_id"], arguments["change_item_id"], arguments["state"]
+            )
+        if tool_name == "akdb_promote":
+            return ChangeSetService(self.conn).promote(
+                arguments["project_id"], arguments["spec_uid"], force=arguments.get("force", False)
+            )
+        if tool_name == "akdb_render_pending":
+            return ChangeSetService(self.conn).render_pending(
+                arguments["project_id"], arguments["target_dest_root"]
+            )
         if tool_name == "akdb_connect":
             return ReasoningService(self.conn).connect(
                 arguments["project_id"], arguments["a_uid"], arguments["b_uid"],
