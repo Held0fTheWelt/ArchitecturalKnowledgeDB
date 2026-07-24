@@ -6,6 +6,7 @@ participant SadService
 participant UMLService
 participant ImportExportService
 participant ExportTargetsService as Targets
+participant "Markdown link projector" as Projector
 database "Database facade" as DB
 participant "Git repository checkout" as Repo
 participant "docs/architecture" as Projection
@@ -20,8 +21,8 @@ end
 Author -> Surface : create/update associated diagram
 Surface -> UMLService : diagram source + source_key + SAD id
 UMLService -> DB : diagram, elements, relationships
-Author -> Surface : verify or synchronize export target
-Surface -> ImportExportService : verify/sync(project, target)
+Author -> Surface : verify, incrementally export, or synchronize target
+Surface -> ImportExportService : operation(project, target)
 ImportExportService -> Targets : resolve_dest_root(project, target)
 Targets -> DB : target + repository registration
 alt explicit absolute destination
@@ -36,7 +37,15 @@ else restored snapshot
   Targets --> ImportExportService : fail closed before write
  end
 end
-ImportExportService -> DB : aggregate SAD/ADR/UML canon
-ImportExportService -> Projection : safe hierarchical paths, UTF-8 LF
-ImportExportService --> Author : verification or file counts
+ImportExportService -> DB : load canonical bodies by repo_source_key
+alt multiple body_text owners
+ ImportExportService --> Author : fail; repair ambiguous canonical payload
+else exactly one body owner
+ ImportExportService -> Projector : canonical body + source path + target path
+ Projector -> Projector : map exported SAD/ADR/UML links into mirror
+ Projector -> Projector : map non-exported links back to registered repository
+ Projector --> ImportExportService : target-specific bytes
+ ImportExportService -> Projection : safe hierarchical paths, preserved encoding
+ ImportExportService --> Author : verification or file counts
+end
 @enduml

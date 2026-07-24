@@ -122,6 +122,10 @@ The self-repository is scanned read-only. Findings are advisory; corrections are
 
 Incremental export, full synchronization, and freshness verification all ask `ExportTargetsService` to resolve the destination. An explicit absolute destination remains absolute after root/path-traversal validation. A relative destination is bound to the target's registered repository: an existing registered `local_path` wins; a source-root candidate or current checkout is accepted only when its sanitized Git remote matches the registration. If repository identity cannot be proven, export fails before any write. See [authoring/export sequence](UML/sequence/sad-authoring-export-sequence.puml).
 
+### 6.8 Target-specific document projection
+
+Imported document bodies retain links relative to their canonical `repo_source_key`. During verification, incremental export, and full synchronization, Markdown links outside fenced examples are projected to the target layout: links to exported SAD, ADR, or UML artifacts point to their mirror locations; links to non-exported repository artifacts point back to their canonical repository locations when the target is repository-relative. External URLs, fragments, and explicit repository-root references remain unchanged. Exactly one knowledge item may own `body_text` for a `repo_source_key`; derived structured records may share the key but cannot compete as export payloads.
+
 ## 7. Deployment View
 
 See [dual-backend deployment](UML/deployment/dual-backend-deployment.puml).
@@ -148,6 +152,8 @@ Portable export targets store a repository id plus a repository-relative destina
 - **Backend portability:** differences stay in database, connection, migration, search, backup seams.
 - **Transactions:** CLI/API/MCP commit success and roll back failure.
 - **Export safety:** empty, current, parent-traversal, and filesystem-root destinations are rejected. Relative destinations require a registered repository and fail closed unless an existing registration path or matching Git checkout proves the target boundary.
+- **Projection-safe references:** canonical Markdown retains repository-relative intent; the export layer rebases local links against the mirror layout without changing the stored body or fenced examples.
+- **Single body owner:** one and only one item with `body_text` supplies each `repo_source_key`; structured derivatives are never selected nondeterministically as file payloads.
 - **Public boundary:** only AKDB-owned architecture is exported here.
 
 ## 9. Architecture Decisions
@@ -164,6 +170,7 @@ Portable export targets store a repository id plus a repository-relative destina
 | D-SAD | SAD and UML authoring use supported DB-native services | Accepted |
 | D-MULTI | Root and subsystem SADs export hierarchically | Accepted |
 | D-EXPORT | Relative export destinations are repository-bound and fail closed | Accepted |
+| D-PROJECTION | Target mirrors rebase canonical links and require one body owner | Accepted |
 
 ### D1: Active standalone Outer Tool classification
 
@@ -225,6 +232,12 @@ Each SAD owns an export source_key; diagrams carry sad_document_id; export never
 
 Export targets bind a destination to a registered repository. Existing registered paths are authoritative locally; restored-checkout fallbacks require a matching sanitized Git remote. Unsafe roots and traversal are rejected, and unresolved repository identity stops the operation before writes. See [ADR-AKDB-0002](../adr/adr-akdb-0002-bind-relative-export-destinations-to-registered-repositories.md).
 
+### D-PROJECTION: Target mirrors rebase canonical links and require one body owner
+
+**Status:** Accepted
+
+Canonical document bodies retain repository-source link semantics. Verification, incremental export, and full synchronization apply the same target-specific Markdown projection. Exportable SAD/ADR/UML links resolve inside the mirror; non-exported artifacts resolve against the registered repository when possible. Fenced examples, external URLs, fragments, and explicit repository-root references are unchanged. Multiple `body_text` owners for one `repo_source_key` are rejected. See [ADR-AKDB-0003](../adr/adr-akdb-0003-project-canonical-links-into-target-mirrors.md).
+
 ## 10. Quality Requirements
 
 | Quality | Scenario | Evidence |
@@ -235,6 +248,8 @@ Export targets bind a destination to a registered repository. Existing registere
 | Project isolation | No undeclared cross-project leakage. | `test_project_isolation.py` |
 | Determinism | Unchanged DB exports byte-identically. | round-trip and export verification |
 | Export boundary safety | A relative mirror resolves to its registered repository; an unrelated checkout is rejected before writes. | `tests/services/test_export_targets.py`, export sync/verify tests |
+| Projection integrity | Full sync, incremental export, and verification derive identical target-relative Markdown links from canonical source paths; fenced examples remain verbatim. | `tests/services/test_export_sync.py` |
+| Canonical payload uniqueness | Ambiguous `body_text` owners fail instead of making row-order-dependent output. | export sync/incremental tests |
 | Provenance | Self uses `akdb://`; imports retain origins. | authoring tests |
 | Agent compatibility | MCP authoring and retrieval tools dispatch consistently. | MCP tests |
 
@@ -249,6 +264,8 @@ Export targets bind a destination to a registered repository. Existing registere
 | Backend ranking variance | Result order can differ. | Test relevance invariants. |
 | Mixed authority contexts | Users may trust wrong owner. | Always surface URI and authority. |
 | Unavailable repository registration | Portable snapshot export cannot resolve its destination. | Fail closed; restore a valid registration path or run in a checkout with the registered sanitized remote. |
+| Absolute external export target | A target outside the registered repository has no provable path back to non-mirrored repository files. | Preserve unresolved source links; prefer repository-relative targets for complete projections. |
+| Unsupported Markdown link syntax | Reference definitions or unusual inline syntax may not be projected. | Keep projection parser deliberately narrow, test observed syntax, and fail link gates on unresolved targets. |
 | Generated file edits | Changes vanish. | README warning and deterministic CI gate. |
 
 ## 12. Glossary

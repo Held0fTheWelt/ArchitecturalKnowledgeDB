@@ -11,5 +11,6 @@ hand-edit their decision content.
 | --- | --- | --- |
 | [ADR-AKDB-0001](ADR-AKDB-0001-dual-backend.md) | SQLite default, PostgreSQL opt-in via a Database facade | Accepted |
 | [ADR-AKDB-0002](adr-akdb-0002-bind-relative-export-destinations-to-registered-repositories.md) | Bind relative export destinations to registered repositories | Accepted |
+| [ADR-AKDB-0003](adr-akdb-0003-project-canonical-links-into-target-mirrors.md) | Project canonical links into target mirrors | Accepted |
 
 Public operator guidance: [operations/postgres.md](../operations/postgres.md).

@@ -8,7 +8,7 @@ import shutil
 import sqlite3
 from pathlib import Path, PurePosixPath
 from typing import Any
-from urllib.parse import unquote
+from urllib.parse import unquote, urlsplit, urlunsplit
 
 from architectural_knowledge_db.config import auto_export_root_for_database
 from architectural_knowledge_db.models import AdrInput, DefinitionInput, KnowledgeLinkInput, RuleInput, SourceAreaInput
@@ -26,6 +26,10 @@ ADR_TITLE_PREFIX_RE = re.compile(
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
 FRONTMATTER_RE = re.compile(r"\A---\s*\n(?P<body>.*?)\n---\s*\n", re.DOTALL)
 MARKDOWN_LINK_RE = re.compile(r"(?<!!)\[[^\]\n]+\]\(([^)\n]+)\)")
+MIRROR_MARKDOWN_LINK_RE = re.compile(
+    r"(?P<prefix>!?\[[^\]\n]*\]\()(?P<target>[^)\n]+)(?P<suffix>\))"
+)
+MARKDOWN_FENCE_RE = re.compile(r"^\s*(?P<fence>`{3,}|~{3,})")
 SAD_DECISION_RE = re.compile(
     r"^###\s+(?P<decision_id>D(?:\d+|-\w+))\s*[:.-]\s*(?P<title>.+?)\s*$",
     re.IGNORECASE | re.MULTILINE,
@@ -636,6 +640,7 @@ class ImportExportService:
         if target is None:
             raise ValueError(f"Unknown export target {target_id} in project {project_id}")
         dest_root = targets.resolve_dest_root(project_id, target_id)
+        mirror_root_key = _target_mirror_root_key(target)
         rows = targets.drain_dirty(project_id, target_id)
         written: list[str] = []
         deleted: list[str] = []
@@ -666,6 +671,14 @@ class ImportExportService:
                 deleted.append(str(mirror_path))
                 continue
             body_text, encoding = record
+            relative_path = mirror_path.relative_to(dest_root).as_posix()
+            mirror_repo_path = posixpath.join(mirror_root_key, relative_path)
+            body_text = _project_mirror_body(
+                body_text,
+                item_ref,
+                mirror_repo_path,
+                mirror_root_key,
+            )
             mirror_path.parent.mkdir(parents=True, exist_ok=True)
             _write_text_exact_with_encoding(mirror_path, body_text, encoding)
             written.append(str(mirror_path))
@@ -706,7 +719,12 @@ class ImportExportService:
             _prune_empty_dirs(pending_dir, dest_root)
         return {"written": written, "deleted": deleted}
 
-    def _expected_mirror_files(self, project_id: str, dest_root: Path) -> dict[str, tuple[str, str]]:
+    def _expected_mirror_files(
+        self,
+        project_id: str,
+        dest_root: Path,
+        mirror_root_key: str = "",
+    ) -> dict[str, tuple[str, str]]:
         """{mirror-relative path: (body_text, body_encoding)} for every item mappable into dest_root.
 
         Same source of truth as export_canon: every project item carrying
@@ -717,17 +735,32 @@ class ImportExportService:
         """
         items = self.knowledge.list_items(project_id, include_shared=False, limit=100000)
         expected: dict[str, tuple[str, str]] = {}
+        body_owners: dict[str, str] = {}
         for item in items:
             metadata = item.get("metadata") or {}
             repo_key = metadata.get("repo_source_key")
             body_text = metadata.get("body_text")
             if not repo_key or body_text is None:
                 continue
+            previous_owner = body_owners.get(repo_key)
+            if previous_owner is not None:
+                raise ValueError(
+                    "Multiple canonical body_text owners for repo_source_key "
+                    f"{repo_key}: {previous_owner}, {item['item_uid']}"
+                )
+            body_owners[repo_key] = item["item_uid"]
             mirror_path = _mirror_path(dest_root, repo_key)
             if mirror_path is None:
                 continue
             rel = mirror_path.relative_to(dest_root).as_posix()
-            expected[rel] = (body_text, metadata.get("body_encoding", "utf-8"))
+            mirror_repo_path = posixpath.join(mirror_root_key, rel)
+            projected_text = _project_mirror_body(
+                body_text,
+                repo_key,
+                mirror_repo_path,
+                mirror_root_key,
+            )
+            expected[rel] = (projected_text, metadata.get("body_encoding", "utf-8"))
         return expected
 
     def verify_export(self, project_id: str, target_id: str) -> dict[str, Any]:
@@ -742,7 +775,11 @@ class ImportExportService:
         if target is None:
             raise ValueError(f"Unknown export target {target_id} in project {project_id}")
         dest_root = ExportTargetsService(self.conn).resolve_dest_root(project_id, target_id)
-        expected = self._expected_mirror_files(project_id, dest_root)
+        expected = self._expected_mirror_files(
+            project_id,
+            dest_root,
+            _target_mirror_root_key(target),
+        )
         actual = (
             {
                 p.relative_to(dest_root).as_posix(): p
@@ -802,7 +839,11 @@ class ImportExportService:
             raise ValueError(f"Unknown export target {target_id} in project {project_id}")
         dest_root = targets.resolve_dest_root(project_id, target_id)
         dest_root.mkdir(parents=True, exist_ok=True)
-        expected = self._expected_mirror_files(project_id, dest_root)
+        expected = self._expected_mirror_files(
+            project_id,
+            dest_root,
+            _target_mirror_root_key(target),
+        )
         written: list[str] = []
         for rel, (body_text, encoding) in expected.items():
             target_path = dest_root / Path(*PurePosixPath(rel).parts)
@@ -828,20 +869,27 @@ class ImportExportService:
         return {"written": written, "pruned": pruned}
 
     def _find_by_repo_source_key(self, project_id: str, repo_source_key: str) -> tuple[str, str] | None:
-        row = self.conn.execute(
+        rows = self.conn.execute(
             """
-            SELECT metadata_json FROM knowledge_items
+            SELECT item_uid, metadata_json FROM knowledge_items
             WHERE project_id = ? AND json_extract(metadata_json, '$.repo_source_key') = ?
+            ORDER BY item_uid
             """,
             (project_id, repo_source_key),
-        ).fetchone()
-        if row is None:
+        ).fetchall()
+        payloads: list[tuple[str, str]] = []
+        for row in rows:
+            metadata = json.loads(row["metadata_json"] or "{}")
+            body_text = metadata.get("body_text")
+            if body_text is not None:
+                payloads.append((body_text, metadata.get("body_encoding", "utf-8")))
+        if not payloads:
             return None
-        metadata = json.loads(row["metadata_json"] or "{}")
-        body_text = metadata.get("body_text")
-        if body_text is None:
-            return None
-        return body_text, metadata.get("body_encoding", "utf-8")
+        if len(payloads) > 1:
+            raise ValueError(
+                f"Multiple canonical body_text owners for repo_source_key {repo_source_key}"
+            )
+        return payloads[0]
 
     def export_links(self, project_id: str, folder: str | Path) -> dict[str, Any]:
         root = Path(folder)
@@ -1913,6 +1961,147 @@ def _mirror_path(dest_root: str | Path, repo_source_key: str) -> Path | None:
                 return None
             return Path(dest_root) / Path(*candidate.parts)
     return None
+
+
+def _target_mirror_root_key(target: dict[str, Any]) -> str:
+    configured = str(target.get("dest_root") or "").replace("\\", "/")
+    if not configured or Path(configured).is_absolute():
+        return ""
+    return str(PurePosixPath(configured))
+
+
+_REPO_ROOT_LINK_PREFIXES = frozenset(
+    {
+        "AIPlugins",
+        "Automation",
+        "BridgePlugins",
+        "Config",
+        "docs",
+        "EnginePlugins",
+        "Gates",
+        "GovernanceDevelopmentPlugins",
+        "ScenePlugins",
+        "Source",
+        "Tools",
+        "UML",
+    }
+)
+
+
+def _project_mirror_body(
+    body_text: str,
+    repo_source_key: str,
+    mirror_relative_path: str,
+    mirror_root_key: str,
+) -> str:
+    source_suffix = PurePosixPath(repo_source_key.replace("\\", "/")).suffix.lower()
+    mirror_suffix = PurePosixPath(mirror_relative_path.replace("\\", "/")).suffix.lower()
+    if source_suffix not in {".md", ".markdown"} or mirror_suffix != source_suffix:
+        return body_text
+    source_parent = posixpath.dirname(repo_source_key.replace("\\", "/"))
+    mirror_parent = posixpath.dirname(mirror_relative_path.replace("\\", "/"))
+    if source_parent == mirror_parent:
+        return body_text
+
+    lines: list[str] = []
+    fence_char = ""
+    fence_length = 0
+    for line in body_text.splitlines(keepends=True):
+        fence = MARKDOWN_FENCE_RE.match(line)
+        if fence_char:
+            if fence:
+                marker = fence.group("fence")
+                if marker[0] == fence_char and len(marker) >= fence_length:
+                    fence_char = ""
+                    fence_length = 0
+            lines.append(line)
+            continue
+        if fence:
+            marker = fence.group("fence")
+            fence_char = marker[0]
+            fence_length = len(marker)
+            lines.append(line)
+            continue
+        lines.append(
+            MIRROR_MARKDOWN_LINK_RE.sub(
+                lambda match: (
+                    f"{match.group('prefix')}"
+                    f"{_rebase_markdown_target(
+                        match.group('target'),
+                        source_parent,
+                        mirror_parent,
+                        mirror_root_key,
+                    )}"
+                    f"{match.group('suffix')}"
+                ),
+                line,
+            )
+        )
+    return "".join(lines)
+
+
+def _rebase_markdown_target(
+    raw_target: str,
+    source_parent: str,
+    mirror_parent: str,
+    mirror_root_key: str,
+) -> str:
+    leading = raw_target[: len(raw_target) - len(raw_target.lstrip())]
+    trailing = raw_target[len(raw_target.rstrip()) :]
+    value = raw_target.strip()
+    if not value or value.startswith("#"):
+        return raw_target
+
+    wrapped = value.startswith("<")
+    target_value = value
+    title_suffix = ""
+    if wrapped:
+        closing = value.find(">")
+        if closing < 0:
+            return raw_target
+        target_value = value[1:closing]
+        title_suffix = value[closing + 1 :]
+    else:
+        match = re.fullmatch(r"(?P<target>\S+)(?P<title>\s+(?:\"[^\"]*\"|'[^']*'))?", value)
+        if not match:
+            return raw_target
+        target_value = match.group("target")
+        title_suffix = match.group("title") or ""
+
+    parsed = urlsplit(target_value)
+    if parsed.scheme or parsed.netloc or not parsed.path or parsed.path.startswith("/"):
+        return raw_target
+    normalized_path = parsed.path.replace("\\", "/")
+    first_segment = normalized_path.split("/", 1)[0]
+    if not normalized_path.startswith(".") and first_segment in _REPO_ROOT_LINK_PREFIXES:
+        return raw_target
+
+    canonical_target = posixpath.normpath(posixpath.join(source_parent, normalized_path))
+    if canonical_target == ".." or canonical_target.startswith("../"):
+        return raw_target
+    mapped_target = _mirror_path(Path("."), canonical_target)
+    if mapped_target is not None:
+        mapped_relative = mapped_target.as_posix()
+        if mapped_relative.startswith("./"):
+            mapped_relative = mapped_relative[2:]
+        projected_target = posixpath.join(mirror_root_key, mapped_relative)
+    elif mirror_root_key:
+        projected_target = canonical_target
+    else:
+        # An absolute export destination may live outside the registered
+        # repository, so its relative route back to a non-mirrored source is
+        # unknowable. Preserve that source link instead of fabricating one.
+        return raw_target
+
+    rebased_path = posixpath.relpath(projected_target, mirror_parent)
+    if normalized_path.endswith("/") and not rebased_path.endswith("/"):
+        rebased_path += "/"
+    rebased_target = urlunsplit(("", "", rebased_path, parsed.query, parsed.fragment))
+    if wrapped:
+        rebased_target = f"<{rebased_target}>{title_suffix}"
+    else:
+        rebased_target = f"{rebased_target}{title_suffix}"
+    return f"{leading}{rebased_target}{trailing}"
 
 
 def _prune_empty_dirs(start: Path, stop_at: Path) -> None:
