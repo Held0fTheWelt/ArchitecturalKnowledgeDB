@@ -3,8 +3,11 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from architectural_knowledge_db.models import ChangeItemInput
+from architectural_knowledge_db.models import AdrInput, ChangeItemInput, SadDecisionInput
 from architectural_knowledge_db.services.authoring import AuthoringService
+from architectural_knowledge_db.services.knowledge import KnowledgeService
+from architectural_knowledge_db.services.sad import SadService
+from architectural_knowledge_db.services.uml import UMLService
 
 
 class ImpactParseError(ValueError):
@@ -199,3 +202,212 @@ class ChangeSetService:
             ).fetchone()
         )
         return {"changed": before["state"] != state, "item": item}
+
+    # -- promote (reconcile two target classes into the Ist) --------------
+
+    _CLOSING_OPS = {"supersede", "remove"}
+
+    def promote(self, project_id: str, spec_uid: str, force: bool = False) -> dict[str, Any]:
+        """One transaction: guard on open items, verify every target exists,
+        apply status-flip/presence-verify/delete per kind, then close out.
+        No mutation happens until every target has been resolved (§8/D3).
+        """
+        items = self._items(project_id, spec_uid)
+        if not force and any(item["state"] != "done" for item in items):
+            return {"refused": True, "reason": "open items"}
+
+        resolved: list[tuple[dict[str, Any], Any]] = []
+        for item in items:
+            target = self._resolve_target(project_id, item)
+            if target is None:
+                return {"refused": True, "reason": f"target {item['target_ref']} not present"}
+            resolved.append((item, target))
+
+        promoted = []
+        for item, target in resolved:
+            self._apply_promotion(project_id, item, target)
+            promoted.append(
+                {
+                    "id": item["id"],
+                    "op": item["op"],
+                    "target_kind": item["target_kind"],
+                    "target_ref": item["target_ref"],
+                }
+            )
+
+        for item in items:
+            self.set_item_state(project_id, item["id"], "done")
+
+        spec_result = AuthoringService(self.conn).set_spec_status(project_id, spec_uid, "implemented")
+        return {"promoted": promoted, "spec": spec_result["spec"]}
+
+    def _resolve_target(self, project_id: str, item: dict[str, Any]) -> Any:
+        kind = item["target_kind"]
+        ref = item["target_ref"]
+        if kind == "adr":
+            return self._resolve_adr(project_id, ref)
+        if kind == "sad_decision":
+            return self._resolve_sad_decision(project_id, ref)
+        if kind == "sad_section":
+            return self._resolve_sad_section(project_id, ref)
+        if kind == "rule":
+            return self._resolve_by_local_id(project_id, "rule", ref)
+        if kind == "definition":
+            return self._resolve_by_local_id(project_id, "definition", ref)
+        if kind == "uml_element":
+            return self._resolve_uml_element(project_id, ref)
+        if kind == "uml_relationship":
+            return self._resolve_uml_relationship(project_id, ref)
+        raise ValueError(f"unknown change_item target_kind: {kind}")
+
+    def _resolve_adr(self, project_id: str, adr_id: str) -> dict[str, Any] | None:
+        try:
+            return KnowledgeService(self.conn).get_adr(project_id, adr_id)
+        except ValueError:
+            return None
+
+    def _resolve_by_local_id(self, project_id: str, item_type: str, local_id: str) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            "SELECT item_uid FROM knowledge_items WHERE project_id=? AND item_type=? AND local_id=?",
+            (project_id, item_type, local_id),
+        ).fetchone()
+        if row is None:
+            return None
+        return KnowledgeService(self.conn).get_item_by_uid(row["item_uid"])
+
+    def _resolve_sad_decision(self, project_id: str, ref: str) -> dict[str, Any] | None:
+        document_id, _, decision_id = ref.partition(":")
+        try:
+            document = SadService(self.conn).get_document(project_id, document_id)
+        except ValueError:
+            return None
+        for decision in document["decisions"]:
+            if (decision.get("metadata") or {}).get("decision_id") == decision_id:
+                return decision
+        return None
+
+    def _resolve_sad_section(self, project_id: str, ref: str) -> dict[str, Any] | None:
+        document_id, _, section_id = ref.partition(":")
+        try:
+            document = SadService(self.conn).get_document(project_id, document_id)
+        except ValueError:
+            return None
+        for section in document["sections"]:
+            if (section.get("metadata") or {}).get("section_id") == section_id:
+                return section
+        return None
+
+    def _resolve_uml_element(self, project_id: str, ref: str) -> dict[str, Any] | None:
+        uml = UMLService(self.conn)
+        diagram_id, sep, name = ref.rpartition(":")
+        if sep:
+            try:
+                diagram = uml.get_diagram(project_id, diagram_id)
+            except ValueError:
+                diagram = None
+            if diagram:
+                for element in diagram.get("elements", []):
+                    if element["name"] == name or element["element_id"] == name:
+                        return element
+        try:
+            return uml.get_element(project_id, ref)
+        except ValueError:
+            return None
+
+    def _resolve_uml_relationship(self, project_id: str, ref: str) -> dict[str, Any] | None:
+        match = re.fullmatch(r"(?:(?P<diagram>[^:]+):)?(?P<source>.+?)->(?P<target>.+)", ref)
+        if not match:
+            return None
+        diagram_id = match.group("diagram")
+        source_name = match.group("source").strip()
+        target_name = match.group("target").strip()
+        uml = UMLService(self.conn)
+        if diagram_id:
+            try:
+                diagrams = [uml.get_diagram(project_id, diagram_id)]
+            except ValueError:
+                diagrams = []
+        else:
+            diagrams = [uml.get_diagram(project_id, d["diagram_id"]) for d in uml.list_diagrams(project_id, limit=5000)]
+        for diagram in diagrams:
+            elements = diagram.get("elements", [])
+            source = next((e for e in elements if e["name"] == source_name or e["element_id"] == source_name), None)
+            target = next((e for e in elements if e["name"] == target_name or e["element_id"] == target_name), None)
+            if not source or not target:
+                continue
+            for relationship in diagram.get("relationships", []):
+                if (
+                    relationship["source_element_id"] == source["element_id"]
+                    and relationship["target_element_id"] == target["element_id"]
+                ):
+                    return relationship
+        return None
+
+    def _apply_promotion(self, project_id: str, item: dict[str, Any], target: Any) -> None:
+        kind = item["target_kind"]
+        op = item["op"]
+        ref = item["target_ref"]
+        closing = op in self._CLOSING_OPS
+
+        if kind == "adr":
+            self._reupsert_adr(project_id, target, "superseded" if closing else "accepted")
+            return
+        if kind == "sad_decision":
+            document_id, _, decision_id = ref.partition(":")
+            self._reupsert_sad_decision(
+                project_id, document_id, decision_id, target, "superseded" if closing else "current"
+            )
+            return
+        if not closing:
+            # presence-based, add|modify: presence already verified above — no status write.
+            return
+        if kind == "sad_section":
+            document_id, _, section_id = ref.partition(":")
+            SadService(self.conn).delete_section(project_id, document_id, section_id)
+        elif kind == "uml_element":
+            UMLService(self.conn).delete_element(project_id, target["element_id"])
+        elif kind == "uml_relationship":
+            UMLService(self.conn).delete_relationship(project_id, target["relationship_uid"])
+        # rule/definition supersede|remove cannot occur here — rejected at parse (Task P2a).
+
+    def _reupsert_adr(self, project_id: str, adr_item: dict[str, Any], status: str) -> None:
+        KnowledgeService(self.conn).upsert_adr(
+            project_id,
+            AdrInput(
+                adr_id=adr_item["adr_id"],
+                title=adr_item["title"],
+                status=status,
+                context_md=adr_item.get("context_md"),
+                decision_md=adr_item.get("decision_md"),
+                consequences_md=adr_item.get("consequences_md"),
+                supersedes=adr_item.get("supersedes", []),
+                superseded_by=adr_item.get("superseded_by", []),
+                authority_level=adr_item.get("authority_level") or "accepted_adr",
+                summary=adr_item.get("summary"),
+                source_uri=adr_item.get("source_uri"),
+                metadata=adr_item.get("metadata", {}),
+                raw_source=adr_item.get("raw_source"),
+                sections=adr_item.get("sections", []),
+            ),
+        )
+
+    def _reupsert_sad_decision(
+        self, project_id: str, document_id: str, decision_id: str, decision_item: dict[str, Any], status: str
+    ) -> None:
+        metadata = decision_item.get("metadata") or {}
+        title = decision_item["title"]
+        prefix = f"{decision_id}: "
+        if title.startswith(prefix):
+            title = title[len(prefix):]
+        SadService(self.conn).upsert_decision(
+            project_id,
+            SadDecisionInput(
+                document_id=document_id,
+                decision_id=decision_id,
+                title=title,
+                order=metadata.get("order", 0),
+                status=status,
+                body_md=metadata.get("body_md", ""),
+                summary=decision_item.get("summary"),
+            ),
+        )
