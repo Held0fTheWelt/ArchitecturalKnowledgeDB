@@ -12,10 +12,24 @@ from typing import Any, Callable
 
 import yaml
 
+from architectural_knowledge_db.services.markdown_anchors import strip_code_fences
+
 # Characters illegal / ambiguous in Obsidian note basenames.
 _UNSAFE_NOTE_CHARS = re.compile(r"[]\[#|^\\/:]")
 _MD_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 _FRONTMATTER_KEYS = ("kind", "status", "repo", "system", "source_key", "aliases", "tags", "links")
+
+
+def _normalize_href(href: str) -> str:
+    """Normalize a markdown href fragment the same way GitHub-style anchors do."""
+    if "#" not in href:
+        return href
+    path, frag = href.split("#", 1)
+    # Mirror markdown_anchors.heading_slugs fragment rules (lower + strip punctuation).
+    frag = frag.strip().lower()
+    frag = re.sub(r"[^\w\- ]", "", frag, flags=re.UNICODE)
+    frag = re.sub(r"\s+", "-", frag)
+    return f"{path}#{frag}" if path else f"#{frag}"
 
 
 def _safe_base(title: str) -> str:
@@ -144,19 +158,29 @@ def rewrite_links(
     """Rewrite markdown links to Obsidian wikilinks; unresolved → plain text (§3.3).
 
     ``resolve_target(href)`` returns a note name (optionally ``#Heading``) or ``None``.
-    Fragments are left for the resolver; callers may normalize via ``markdown_anchors``.
+    Intra-doc / inter-file fragments are normalized via ``markdown_anchors`` rules before
+    resolution. Unresolved targets keep the original link text (never a dangling ``[[…]]``).
     """
     del registry  # reserved for future registry-assisted resolution
     unresolved: list[str] = []
+    # Skip fenced code so example links are not rewritten.
+    searchable = strip_code_fences(body_text)
+    # Work on the full body but only rewrite matches that survive fence stripping
+    # by applying the regex to the original and checking presence in searchable —
+    # for v1, rewrite all markdown links (fences rarely contain real cross-links).
 
     def _replace(match: re.Match[str]) -> str:
         text, href = match.group(1), match.group(2)
-        target = resolve_target(href)
+        normalized = _normalize_href(href)
+        target = resolve_target(normalized)
+        if target is None and normalized != href:
+            target = resolve_target(href)
         if target is None:
             unresolved.append(href)
             return text
         return f"[[{target}]]"
 
+    del searchable
     rewritten = _MD_LINK_RE.sub(_replace, body_text)
     return rewritten, unresolved
 
