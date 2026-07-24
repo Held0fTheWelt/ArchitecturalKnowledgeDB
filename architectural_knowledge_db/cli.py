@@ -26,6 +26,7 @@ from architectural_knowledge_db.models import (
     SadDocumentInput,
     SadSectionInput,
     SourceAreaInput,
+    SpecInput,
     UMLDiagramInput,
     UMLDiagramUpdate,
     UMLElementInput,
@@ -33,10 +34,12 @@ from architectural_knowledge_db.models import (
     UMLRelationshipInput,
     UMLRelationshipUpdate,
 )
+from architectural_knowledge_db.services.authoring import AuthoringService
+from architectural_knowledge_db.services.change_sets import ChangeSetService
 from architectural_knowledge_db.services.consistency import ConsistencyService
 from architectural_knowledge_db.services.context import ContextPackBuilder
 from architectural_knowledge_db.services.git_scanner import GitScanner
-from architectural_knowledge_db.services.import_export import ImportExportService
+from architectural_knowledge_db.services.import_export import ImportExportService, repo_relative_key
 from architectural_knowledge_db.services.knowledge import KnowledgeService
 from architectural_knowledge_db.services.origin import OriginService
 from architectural_knowledge_db.services.projects import ProjectService
@@ -65,6 +68,9 @@ mcp_app = typer.Typer(help="MCP manifest and dispatch helpers.")
 uml_app = typer.Typer(help="Import, export, and edit UML diagrams.")
 consistency_app = typer.Typer(help="Run consistency checks and inspect links.")
 workspace_app = typer.Typer(help="Multi-repo workspace inventory + cross-reference resolution.")
+spec_app = typer.Typer(help="Author, ingest, and promote specs and their Architektur-Impact deltas.")
+work_app = typer.Typer(help="Inspect the cross-spec change-set backlog.")
+change_app = typer.Typer(help="Manage individual change_items.")
 
 app.add_typer(project_app, name="project")
 app.add_typer(repo_app, name="repo")
@@ -81,6 +87,9 @@ app.add_typer(mcp_app, name="mcp")
 app.add_typer(uml_app, name="uml")
 app.add_typer(consistency_app, name="consistency")
 app.add_typer(workspace_app, name="workspace")
+app.add_typer(spec_app, name="spec")
+app.add_typer(work_app, name="work")
+app.add_typer(change_app, name="change")
 
 
 @app.callback()
@@ -1014,6 +1023,100 @@ def workspace_export_manifest(
     with _conn() as conn:
         path = WorkspaceService(conn).export_manifest(project_id, folder)
     _print({"project_id": project_id, "manifest": path})
+
+
+def _resolve_spec_uid(conn: Any, project_id: str, spec: str) -> str:
+    """Accept a spec's item_uid or its local spec_id (mirrors CompletenessService._resolve_item)."""
+    knowledge = KnowledgeService(conn)
+    try:
+        item = knowledge.get_item_by_uid(spec)
+    except ValueError:
+        item = None
+    if item is not None and item["item_type"] == "spec":
+        return spec
+    row = conn.execute(
+        "SELECT item_uid FROM knowledge_items WHERE project_id = ? AND item_type = 'spec' AND local_id = ?",
+        (project_id, spec),
+    ).fetchone()
+    if row is None:
+        raise ValueError(f"Unknown spec: {spec}")
+    return row["item_uid"]
+
+
+@spec_app.command("ingest")
+def spec_ingest(
+    project: str = typer.Argument(...),
+    spec: str = typer.Argument(..., help="Spec item_uid or spec_id."),
+    file: Path = typer.Argument(..., help="Markdown file containing the spec body + Architektur-Impact section."),
+) -> None:
+    text = file.read_text(encoding="utf-8")
+    with _conn() as conn:
+        spec_uid = _resolve_spec_uid(conn, project, spec)
+        knowledge = KnowledgeService(conn)
+        current = knowledge.get_item_by_uid(spec_uid)
+        details = current["details"]
+        metadata = {
+            **current.get("metadata", {}),
+            "body_text": text,
+            "repo_source_key": repo_relative_key(file),
+            "source_key": file.name,
+        }
+        knowledge.upsert_spec(
+            project,
+            SpecInput(
+                spec_id=details["spec_id"],
+                title=current["title"],
+                archetype=details["archetype"],
+                lifecycle=details.get("lifecycle", "draft"),
+                mvp_uid=details.get("mvp_uid"),
+                sections=details.get("sections", []),
+                summary=current.get("summary"),
+                metadata=metadata,
+            ),
+        )
+        impact = ChangeSetService(conn).ingest_impact(project, spec_uid, text)
+        status = AuthoringService(conn).set_spec_status(project, spec_uid, "ready")
+    _print({"impact": impact, "status": status})
+
+
+@work_app.command("open")
+def work_open(project: str = typer.Argument(...)) -> None:
+    with _conn() as conn:
+        _print(ChangeSetService(conn).open_work_orders(project))
+
+
+@spec_app.command("plan-basis")
+def spec_plan_basis(
+    project: str = typer.Argument(...),
+    spec: str = typer.Argument(..., help="Spec item_uid or spec_id."),
+) -> None:
+    with _conn() as conn:
+        spec_uid = _resolve_spec_uid(conn, project, spec)
+        _print(ChangeSetService(conn).plan_basis(project, spec_uid))
+
+
+@change_app.command("set-state")
+def change_set_state(
+    project: str = typer.Argument(...),
+    item_id: int = typer.Argument(...),
+    state: str = typer.Argument(..., help="proposed | in_progress | done"),
+) -> None:
+    with _conn() as conn:
+        _print(ChangeSetService(conn).set_item_state(project, item_id, state))
+
+
+@spec_app.command("promote")
+def spec_promote(
+    project: str = typer.Argument(...),
+    spec: str = typer.Argument(..., help="Spec item_uid or spec_id."),
+    force: bool = typer.Option(False, "--force", help="Promote even if change items are still open."),
+) -> None:
+    with _conn() as conn:
+        spec_uid = _resolve_spec_uid(conn, project, spec)
+        result = ChangeSetService(conn).promote(project, spec_uid, force=force)
+    _print(result)
+    if result.get("refused"):
+        raise typer.Exit(code=1)
 
 
 export_app = typer.Typer(help="Deterministic corpus export and round-trip verification.")
