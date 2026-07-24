@@ -1216,6 +1216,24 @@ MCP_MANIFEST: dict[str, Any] = {
             },
         },
         {
+            "name": "akdb_obsidian_sync",
+            "description": "Full rebuild of an obsidian-vault export target (derived notes; same as export_sync with layout dispatch).",
+            "input_schema": {
+                "type": "object",
+                "required": ["project_id", "target_id"],
+                "properties": {"project_id": {"type": "string"}, "target_id": {"type": "string"}},
+            },
+        },
+        {
+            "name": "akdb_obsidian_verify",
+            "description": "Byte-compare an obsidian-vault target against the derived renderer; returns matched/mismatched/missing/extra.",
+            "input_schema": {
+                "type": "object",
+                "required": ["project_id", "target_id"],
+                "properties": {"project_id": {"type": "string"}, "target_id": {"type": "string"}},
+            },
+        },
+        {
             "name": "akdb_reingest_project",
             "description": "Rebuild a project's knowledge by re-importing ADRs, architecture documents, and UML from its source folders, then rescanning Git provenance. Use to refresh the DB state after sources change. Folders default to the standard repo layout under source_root (AKDB_SOURCE_ROOT); missing folders are skipped. Writes to the database (run against a DB the agent owns, or with the :8787 service stopped).",
             "input_schema": {
@@ -1425,6 +1443,10 @@ class McpDispatcher:
             return ImportExportService(self.conn).verify_export(arguments["project_id"], arguments["target_id"])
         if tool_name == "akdb_export_sync":
             return ImportExportService(self.conn).export_sync(arguments["project_id"], arguments["target_id"])
+        if tool_name == "akdb_obsidian_sync":
+            return ImportExportService(self.conn).export_sync(arguments["project_id"], arguments["target_id"])
+        if tool_name == "akdb_obsidian_verify":
+            return ImportExportService(self.conn).verify_export(arguments["project_id"], arguments["target_id"])
         if tool_name == "akdb_list_sads":
             return SadService(self.conn).list_documents(arguments["project_id"])
         if tool_name == "akdb_get_sad":

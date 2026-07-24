@@ -92,6 +92,8 @@ app.add_typer(workspace_app, name="workspace")
 app.add_typer(spec_app, name="spec")
 app.add_typer(work_app, name="work")
 app.add_typer(change_app, name="change")
+obsidian_app = typer.Typer(help="Obsidian-vault layout sync and verify (derived render).")
+app.add_typer(obsidian_app, name="obsidian")
 
 
 @app.callback()
@@ -1304,6 +1306,35 @@ def export_target_verify(
     project: str = typer.Argument(...),
     target: str | None = typer.Option(None, "--target"),
 ) -> None:
+    with _conn() as conn:
+        targets = _resolve_targets(conn, project, target)
+        results = {t: ImportExportService(conn).verify_export(project, t) for t in targets}
+    _print(results)
+    drifted = any(r["mismatched"] or r["missing"] or r["extra"] for r in results.values())
+    if drifted:
+        raise typer.Exit(code=1)
+
+
+@obsidian_app.command("sync")
+def obsidian_sync(
+    project: str = typer.Argument(...),
+    target: str | None = typer.Option(None, "--target"),
+) -> None:
+    """Full rebuild of an obsidian-vault target (layout dispatch inside export_sync)."""
+    with _conn() as conn:
+        results = {
+            t: ImportExportService(conn).export_sync(project, t)
+            for t in _resolve_targets(conn, project, target)
+        }
+    _print(results)
+
+
+@obsidian_app.command("verify")
+def obsidian_verify(
+    project: str = typer.Argument(...),
+    target: str | None = typer.Option(None, "--target"),
+) -> None:
+    """Byte-compare an obsidian-vault target; exit 1 on mismatched/missing/extra."""
     with _conn() as conn:
         targets = _resolve_targets(conn, project, target)
         results = {t: ImportExportService(conn).verify_export(project, t) for t in targets}

@@ -104,3 +104,24 @@ def test_akdb_create_canonical_document_tool(conn, tmp_path):
         (result["item_uid"],),
     ).fetchone()
     assert json.loads(owner["metadata_json"])["body_text"] == body
+
+
+def test_akdb_obsidian_sync_and_verify_tools(conn, tmp_path):
+    from tests.services.test_obsidian_expected_files import _seed_min_project
+
+    pid = _seed_min_project(conn)
+    dest = tmp_path / "TTD"
+    ExportTargetsService(conn).register_target(
+        pid,
+        "vault",
+        repository_id="Git",
+        dest_root=str(dest),
+        layout="obsidian-vault",
+        content_kinds=["sad", "adr"],
+        auto_export=False,
+    )
+    dispatcher = McpDispatcher(conn)
+    dispatcher.dispatch("akdb_obsidian_sync", {"project_id": pid, "target_id": "vault"})
+    assert any(dest.rglob("*.md"))
+    result = dispatcher.dispatch("akdb_obsidian_verify", {"project_id": pid, "target_id": "vault"})
+    assert result["mismatched"] == [] and result["missing"] == [] and result["extra"] == []
