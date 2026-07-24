@@ -165,9 +165,47 @@ def test_api_updates_existing_canonical_document_without_source_write(
                 "docs/architecture/plugins/Example/architecture.md"
             ),
             "body_text": replacement,
+            "body_origin": "canonical",
         },
     )
 
     assert response.status_code == 200, response.text
     assert response.json()["item_type"] == "sad"
     assert source.read_text(encoding="utf-8") == "# Example\n\nOriginal.\n"
+
+
+def test_api_creates_canonical_document_without_source_write(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv(
+        "AKDB_DATABASE_PATH",
+        str(tmp_path / "api-canonical-create.sqlite"),
+    )
+    client = TestClient(create_app())
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repository, check=True)
+
+    assert client.post(
+        "/projects",
+        json={"project_id": "p", "display_name": "P"},
+    ).status_code == 200
+    assert client.post(
+        "/projects/p/repositories",
+        json={"repository_id": "Git", "local_path": str(repository)},
+    ).status_code == 200
+
+    source_key = "docs/architecture/plugins/New/architecture.md"
+    response = client.post(
+        "/projects/p/canon/document",
+        json={
+            "repository_id": "Git",
+            "repo_source_key": source_key,
+            "body_text": "# New\n\n## 1. Goals\n\nDB-owned.\n",
+            "body_origin": "canonical",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["item_type"] == "sad"
+    assert not (repository / Path(*source_key.split("/"))).exists()

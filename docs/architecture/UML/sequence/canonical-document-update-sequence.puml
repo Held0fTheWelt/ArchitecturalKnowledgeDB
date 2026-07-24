@@ -1,5 +1,5 @@
 @startuml akdb-canonical-document-update
-title AKDB - Canonical Document Update
+title AKDB - Canonical Create/Update and Commit-Bound Publication
 actor Maintainer
 participant "CLI / API / MCP" as Surface
 participant ImportExportService as Canon
@@ -10,29 +10,55 @@ participant KnowledgeService as Knowledge
 participant ExportTargetsService as Targets
 database "Database facade" as DB
 participant "Generated target mirror" as Mirror
-Maintainer -> Surface : update(project, repository, repo_source_key, body)
-Surface -> Canon : CanonicalDocumentUpdate
+Maintainer -> Surface : create/update(project, repository, repo_source_key,
+body, body_origin=canonical)
+Surface -> Canon : CanonicalDocumentCreate or CanonicalDocumentUpdate
 Canon -> Repositories : require registered repository
 Repositories --> Canon : existing local root
-Canon -> Canon : reject absolute/traversing source key
+Canon -> Canon : reject unsafe path and non-canonical origin
 Canon -> DB : find body_text owner by repo_source_key
-alt owner missing or ambiguous
- Canon --> Maintainer : fail closed
-else exactly one owner
- Canon -> Canon : parse body and verify classification
- alt imported SAD
-  Canon -> DB : remove stale links and SAD children
-  Canon -> SadParser : parse current preamble/sections/decisions
-  SadParser -> Knowledge : rebuild derived records
- else imported ADR
-  Canon -> Knowledge : replace structured ADR and body atomically
- else PlantUML or Mermaid
-  Canon -> UMLService : require exactly one structured source match
-  UMLService -> DB : replace raw source and parsed model
+alt create
+ alt owner exists or identity collides
+  Canon --> Maintainer : fail closed
+ else unused identity
+  Canon -> Canon : parse and classify complete body
+  Canon -> Knowledge : create body owner, links, SAD children
+  opt ADR path
+   Canon -> Knowledge : create structured ADR
+  end
+  opt supported UML path
+   Canon -> UMLService : create structured diagram
+  end
  end
- Canon -> Knowledge : preserve owner UID; store akdb:// provenance
- Knowledge -> Targets : mark canonical path dirty
- Targets -> Mirror : incremental target-specific projection
- Canon --> Maintainer : owner, derivative, and UML update result
+else update
+ alt owner missing or ambiguous
+  Canon --> Maintainer : fail closed
+ else exactly one owner
+  Canon -> Canon : reject exact generated projection feedback
+  Canon -> Canon : parse body and verify classification
+  Canon -> DB : replace stale links and SAD children
+  opt ADR owner
+   Canon -> Knowledge : replace structured ADR
+  end
+  opt UML path
+   Canon -> UMLService : require and replace one structured diagram
+  end
+  Canon -> Knowledge : preserve owner UID and akdb:// provenance
+ end
+end
+Knowledge -> Targets : persist dirty row in same transaction
+alt authoritative rollback
+ DB -> DB : roll back canonical data and dirty row
+ DB --> Mirror : no callback and no write
+else authoritative commit
+ DB -> Targets : run one coalesced post-commit flush
+ Targets -> Mirror : target-specific incremental projection
+ alt projection succeeds
+  Targets -> DB : commit dirty-queue drain
+  Surface --> Maintainer : canonical and projection current
+ else projection fails
+  Targets -> DB : roll back drain; repair work remains dirty
+  Surface --> Maintainer : canonical committed; projection stale/error
+ end
 end
 @enduml

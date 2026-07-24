@@ -1,18 +1,32 @@
 @startuml akdb-document-lifecycle
 title AKDB - DB-Native Architecture Document Lifecycle
-[*] --> Draft : upsert document
-Draft --> Current : sections/decisions complete
-Current --> Current : DB-native edit
-Current --> Exported : deterministic export
-Exported --> Current : next DB-native edit
+state "Draft request" as Draft
+state "Canonical current
+(projection may be dirty)" as Canonical
+state "Projection current" as Exported
+state "Verified" as Verified
+state "Superseded" as Superseded
+state "Deleted" as Deleted
+[*] --> Draft : canonical create request
+Draft --> Canonical : authoritative commit
+Draft --> [*] : validation failure or rollback
+(no mirror write)
+Canonical --> Exported : post-commit export succeeds
+Canonical --> Canonical : export fails
+dirty repair work retained
+Exported --> Canonical : next DB-native update commits
 Exported --> Verified : repeat export + tests + drift checks
-Verified --> Current : architecture/code change
-Current --> Superseded : replacement accepted
-Draft --> Deleted : explicit delete
+Verified --> Canonical : architecture/code change commits
+Canonical --> Superseded : replacement accepted
+Exported --> Superseded : replacement accepted
 Superseded --> Deleted : explicit cleanup
 Deleted --> [*]
 note right of Exported
 Exported Markdown and PlantUML are projections.
-They are never the edit/import loop for this project.
+They are never create/update input for this project.
+end note
+note right of Canonical
+Canonical state is authoritative before target I/O.
+A stale projection never rolls back committed knowledge.
 end note
 @enduml

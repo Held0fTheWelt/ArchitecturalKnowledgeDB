@@ -1,17 +1,19 @@
 @startuml akdb-traceability
 title ArchitecturalKnowledgeDB - Architecture Traceability
 left to right direction
-rectangle "SAD root\narchitecture.md" as Root
-rectangle "Agent-authoring SAD\nsubsystems/agent-authoring" as Child
+rectangle "SAD root
+architecture.md" as Root
+rectangle "Agent-authoring SAD
+subsystems/agent-authoring" as Child
 rectangle "DB facade + schemas" as DB
 rectangle "CLI / API / MCP" as Surfaces
 rectangle "SAD/UML services" as Authoring
 rectangle "Search / context / cognition" as Recall
 rectangle "Git scan / reingest" as Provenance
 rectangle "Deterministic export" as Export
-Root --> DB : D-DB
-Root --> Authoring : D-SAD
-Root --> Export : D-SoR / D-MULTI / D-CANON-UPDATE
+Root --> DB : D-DB / D-COMMIT-EXPORT
+Root --> Authoring : D-SAD / D-CANON-CREATE / D-CANON-UPDATE
+Root --> Export : D-SoR / D-MULTI / D-PROJECTION
 Root --> Surfaces : D3
 Root --> Provenance : D4
 Child --> Authoring : D1-D8
@@ -21,9 +23,9 @@ Surfaces --> Recall
 Authoring --> DB
 Recall --> DB
 Provenance --> DB
-DB --> Export
+DB --> Export : post-commit only
 note bottom
-Code: sad.py, uml.py, import_export.py, database.py, connection.py, cli.py, app.py, mcp.py.
-Tests: test_sad_authoring.py, test_uml.py, test_export_sad_cli.py, test_canonical_document_update.py, API/MCP and PostgreSQL suite.
+Code: sad.py, uml.py, import_export.py, export_flush.py, database.py, connection.py, cli.py, app.py, mcp.py.
+Tests: test_sad_authoring.py, test_uml.py, test_export_autoflush.py, test_canonical_document_update.py, API/MCP and PostgreSQL suite.
 end note
 @enduml

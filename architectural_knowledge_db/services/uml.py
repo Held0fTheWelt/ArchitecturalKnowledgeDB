@@ -987,14 +987,16 @@ def detect_kind(text: str, elements: list[dict[str, Any]], relationships: list[d
     types = {element["element_type"] for element in elements}
     if {"class", "interface", "enum", "abstract_class"} & types:
         return "class"
-    if {"actor", "usecase"} & types or "usecase" in lower:
-        return "usecase"
     if {"state"} & types or "[*]" in lower:
         return "state"
     if {"object"} & types:
         return "object"
     if {"participant"} & types:
         return "sequence"
+    if {"usecase"} & types or "usecase" in lower:
+        return "usecase"
+    if {"component"} & types:
+        return "component"
     if "start" in lower and "stop" in lower:
         return "activity"
     return "unknown"

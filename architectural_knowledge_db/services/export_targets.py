@@ -142,6 +142,32 @@ class ExportTargetsService:
             (_bool_param(self.conn, enabled), project_id, target_id),
         )
 
+    def delete_target(self, project_id: str, target_id: str) -> dict[str, Any]:
+        target = self.get_target(project_id, target_id)
+        if target is None:
+            raise ValueError(
+                f"Unknown export target {target_id} in project {project_id}"
+            )
+        self.conn.execute(
+            """
+            DELETE FROM export_dirty
+            WHERE project_id = ? AND target_id = ?
+            """,
+            (project_id, target_id),
+        )
+        self.conn.execute(
+            """
+            DELETE FROM export_targets
+            WHERE project_id = ? AND target_id = ?
+            """,
+            (project_id, target_id),
+        )
+        return {
+            "project_id": project_id,
+            "target_id": target_id,
+            "deleted": True,
+        }
+
     # -- dirty tracking -----------------------------------------------------
 
     def mark_dirty(

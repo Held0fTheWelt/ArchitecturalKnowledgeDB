@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from typing import Any, Sequence
 
 _JSON_EXTRACT_RE = re.compile(
@@ -36,6 +37,8 @@ class Database:
         self._raw = raw
         self.is_postgres = is_postgres
         self._pg_changes = 0
+        self._after_commit: dict[str, Callable[[], None]] = {}
+        self._after_rollback: dict[str, Callable[[], None]] = {}
 
     def execute(self, sql: str, params: Sequence[Any] = ()) -> Any:
         bind = tuple(params)
@@ -57,9 +60,38 @@ class Database:
 
     def commit(self) -> None:
         self._raw.commit()
+        after_commit = list(self._after_commit.values())
+        self._after_commit.clear()
+        self._after_rollback.clear()
+        try:
+            for callback in after_commit:
+                callback()
+            # Post-commit work may drain durable queues. Persist that state in
+            # a second transaction only after the authoritative write is safe.
+            self._raw.commit()
+        except Exception:
+            self._raw.rollback()
+            raise
 
     def rollback(self) -> None:
         self._raw.rollback()
+        after_rollback = list(self._after_rollback.values())
+        self._after_commit.clear()
+        self._after_rollback.clear()
+        for callback in after_rollback:
+            callback()
+
+    def add_transaction_callback(
+        self,
+        key: str,
+        *,
+        after_commit: Callable[[], None],
+        after_rollback: Callable[[], None] | None = None,
+    ) -> None:
+        """Register one coalesced callback pair for the current transaction."""
+        self._after_commit.setdefault(key, after_commit)
+        if after_rollback is not None:
+            self._after_rollback.setdefault(key, after_rollback)
 
     def close(self) -> None:
         self._raw.close()

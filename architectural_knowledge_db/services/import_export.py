@@ -13,6 +13,7 @@ from urllib.parse import unquote, urlsplit, urlunsplit
 from architectural_knowledge_db.config import auto_export_root_for_database
 from architectural_knowledge_db.models import (
     AdrInput,
+    CanonicalDocumentCreate,
     CanonicalDocumentUpdate,
     DefinitionInput,
     KnowledgeLinkInput,
@@ -476,6 +477,227 @@ class ImportExportService:
             ],
         })
 
+    def create_canonical_document(
+        self,
+        project_id: str,
+        request: CanonicalDocumentCreate,
+    ) -> dict[str, Any]:
+        """Create one new DB-owned canonical file and its structured records."""
+        from architectural_knowledge_db.services.export_flush import deferred_export
+        from architectural_knowledge_db.services.repositories import RepositoryService
+        from architectural_knowledge_db.services.uml import (
+            UMLService,
+            parse_mermaid,
+            parse_plantuml,
+        )
+
+        repo_key = _safe_repo_source_key(request.repo_source_key)
+        if self._body_owner_rows(project_id, repo_key):
+            raise ValueError(
+                f"Canonical document already exists for repo_source_key {repo_key}; "
+                "use update_canonical_document"
+            )
+        repository = RepositoryService(self.conn).get_repository(
+            project_id,
+            request.repository_id,
+        )
+        repository_root = Path(repository["local_path"]).expanduser().resolve()
+        if not repository_root.is_dir():
+            raise ValueError(
+                f"Registered repository path does not exist: {repository_root}"
+            )
+        virtual_path = repository_root.joinpath(*PurePosixPath(repo_key).parts)
+        source_key = _canonical_source_key(repo_key)
+        source_uri = f"akdb://{project_id}/canon/{repo_key}"
+        document = parse_document_file(
+            virtual_path,
+            request.body_text,
+            source_uri=source_uri,
+            source_key=source_key,
+        )
+        classification = classify_document(source_key, virtual_path, document)
+        if _is_canonical_adr_source_key(repo_key):
+            classification = {
+                "item_type": "adr",
+                "authority_level": "accepted_adr",
+                "status": "proposed",
+                "doc_kind": "adr",
+            }
+        local_id = self._available_document_local_id(
+            project_id,
+            classification["item_type"],
+            document["document_id"],
+            repo_key,
+            virtual_path,
+        )
+        uml_suffix = virtual_path.suffix.lower()
+        parsed_uml: dict[str, Any] | None = None
+        if uml_suffix in {".puml", ".plantuml", ".mmd", ".mermaid"}:
+            parsed_uml = (
+                parse_mermaid(
+                    request.body_text,
+                    source_uri=source_uri,
+                    source_key=source_key,
+                )
+                if uml_suffix in {".mmd", ".mermaid"}
+                else parse_plantuml(
+                    request.body_text,
+                    source_uri=source_uri,
+                    source_key=source_key,
+                )
+            )
+            diagram_collision = self.conn.execute(
+                """
+                SELECT diagram_id
+                FROM uml_diagrams
+                WHERE project_id = ? AND diagram_id = ?
+                """,
+                (project_id, parsed_uml["diagram_id"]),
+            ).fetchone()
+            if diagram_collision is not None:
+                raise ValueError(
+                    "Canonical UML identity collision for "
+                    f"{repo_key}: {parsed_uml['diagram_id']} already exists"
+                )
+
+        with deferred_export(self.conn):
+            if classification["item_type"] == "adr":
+                parsed_adr = parse_adr_markdown(
+                    request.body_text,
+                    source_uri=source_uri,
+                    source_key=source_key,
+                )
+                collision = self.conn.execute(
+                    """
+                    SELECT item_uid
+                    FROM knowledge_items
+                    WHERE project_id = ?
+                      AND item_type = 'adr'
+                      AND local_id = ?
+                    """,
+                    (project_id, parsed_adr.adr_id),
+                ).fetchone()
+                if collision is not None:
+                    raise ValueError(
+                        "Canonical ADR identity collision for "
+                        f"{repo_key}: {parsed_adr.adr_id} already exists"
+                    )
+                parsed_adr.metadata.update(
+                    {
+                        "source_key": source_key,
+                        "repo_source_key": repo_key,
+                        "repository_id": request.repository_id,
+                        "body_text": request.body_text,
+                        "body_encoding": request.body_encoding,
+                        "authored_in": "akdb",
+                    }
+                )
+                item = self.knowledge.upsert_adr(project_id, parsed_adr)
+                self._link_targets(
+                    project_id,
+                    item["item_uid"],
+                    _markdown_link_targets(request.body_text, virtual_path),
+                    evidence=f"canonical ADR create {repo_key}",
+                )
+                derived: list[dict[str, Any]] = []
+            else:
+                metadata = {
+                    **document.get("metadata", {}),
+                    "source_key": source_key,
+                    "repo_source_key": repo_key,
+                    "repository_id": request.repository_id,
+                    "format": document["format"],
+                    "doc_kind": classification["doc_kind"],
+                    "body_text": request.body_text,
+                    "body_encoding": request.body_encoding,
+                    "headings": document.get("headings", []),
+                    "authored_in": "akdb",
+                }
+                item_uid = self.knowledge._upsert_item(
+                    project_id=project_id,
+                    space_id=None,
+                    item_type=classification["item_type"],
+                    local_id=local_id,
+                    title=document["title"],
+                    status=classification["status"],
+                    authority_level=classification["authority_level"],
+                    summary=document["summary"],
+                    source_uri=source_uri,
+                    metadata=metadata,
+                )
+                self.knowledge._index_item(item_uid)
+                item = self.knowledge.get_item_by_uid(item_uid)
+                self._link_document(
+                    item,
+                    virtual_path,
+                    repository_root,
+                    request.body_text,
+                    document,
+                )
+                derived = self._import_derived_architecture_records(
+                    project_id,
+                    item,
+                    virtual_path,
+                    repository_root,
+                    request.body_text,
+                    document,
+                )
+            diagram_id: str | None = None
+            if parsed_uml is not None:
+                parsed_uml["model"].update(
+                    {
+                        "source_key": source_key,
+                        "repo_source_key": repo_key,
+                        "sad_document_id": request.sad_document_id,
+                        "authored_in": "akdb",
+                    }
+                )
+                diagram = UMLService(self.conn).upsert_diagram(
+                    project_id,
+                    parsed_uml,
+                )
+                diagram_id = diagram["diagram_id"]
+
+        return self._with_auto_export(
+            project_id,
+            {
+                "project_id": project_id,
+                "repository_id": request.repository_id,
+                "repo_source_key": repo_key,
+                "item_uid": item["item_uid"],
+                "item_type": item["item_type"],
+                "derived_records": len(derived),
+                "structured_uml_diagram_id": diagram_id,
+            },
+        )
+
+    def _available_document_local_id(
+        self,
+        project_id: str,
+        item_type: str,
+        local_id: str,
+        repo_key: str,
+        path: Path,
+    ) -> str:
+        seen = self._seen_local_ids_for_project(project_id)
+        previous = seen.get((item_type, local_id))
+        if previous is None or previous == repo_key:
+            return local_id
+        suffix = path.suffix.lstrip(".").lower() or "file"
+        candidate = f"{local_id}--{suffix}"
+        previous = seen.get((item_type, candidate))
+        if previous is None or previous == repo_key:
+            return candidate
+        tree_segment = repo_key.split("/", 1)[0].lower() or "root"
+        candidate = f"{candidate}--{tree_segment}"
+        previous = seen.get((item_type, candidate))
+        if previous is not None and previous != repo_key:
+            raise ValueError(
+                f"Canonical document identity collision for {repo_key}: "
+                f"{item_type}/{candidate} already belongs to {previous}"
+            )
+        return candidate
+
     def update_canonical_document(
         self,
         project_id: str,
@@ -520,6 +742,12 @@ class ImportExportService:
         source_key = metadata.get("source_key") or repo_key
         source_uri = f"akdb://{project_id}/canon/{repo_key}"
         text = request.body_text
+        self._reject_projected_mirror_body(
+            project_id,
+            repo_key,
+            metadata.get("body_text"),
+            text,
+        )
         document = parse_document_file(
             virtual_path,
             text,
@@ -610,6 +838,42 @@ class ImportExportService:
                 "structured_uml_updated": uml,
             },
         )
+
+    def _reject_projected_mirror_body(
+        self,
+        project_id: str,
+        repo_source_key: str,
+        canonical_body: Any,
+        candidate_body: str,
+    ) -> None:
+        """Reject an exact generated projection presented as canonical input."""
+        if not isinstance(canonical_body, str) or candidate_body == canonical_body:
+            return
+        from architectural_knowledge_db.services.export_targets import (
+            ExportTargetsService,
+        )
+
+        targets = ExportTargetsService(self.conn)
+        for target in targets.list_targets(project_id, enabled_only=True):
+            dest_root = targets.resolve_dest_root(project_id, target["target_id"])
+            mirror_path = _mirror_path(dest_root, repo_source_key)
+            if mirror_path is None:
+                continue
+            relative_path = mirror_path.relative_to(dest_root).as_posix()
+            mirror_root_key = _target_mirror_root_key(target)
+            mirror_repo_path = posixpath.join(mirror_root_key, relative_path)
+            projected = _project_mirror_body(
+                canonical_body,
+                repo_source_key,
+                mirror_repo_path,
+                mirror_root_key,
+            )
+            if projected != canonical_body and candidate_body == projected:
+                raise ValueError(
+                    "body_text is the generated projection for export target "
+                    f"{target['target_id']}, not canonical authoring text; "
+                    "read and edit the AKDB body_text owner instead"
+                )
 
     def _body_owner_rows(
         self,
@@ -711,7 +975,12 @@ class ImportExportService:
         body_text: str,
         uml_service: Any,
     ) -> bool:
-        if PurePosixPath(repo_key).suffix.lower() not in {".puml", ".mmd"}:
+        if PurePosixPath(repo_key).suffix.lower() not in {
+            ".puml",
+            ".plantuml",
+            ".mmd",
+            ".mermaid",
+        }:
             return False
         rows = self.conn.execute(
             """
@@ -2106,6 +2375,22 @@ def _safe_repo_source_key(value: str) -> str:
             "repo_source_key must be a safe repository-relative path without traversal"
         )
     return candidate.as_posix()
+
+
+def _canonical_source_key(repo_source_key: str) -> str:
+    normalized = repo_source_key.replace("\\", "/")
+    lowered = normalized.lower()
+    for prefix in ("docs/architecture/", "docs/adr/", "uml/"):
+        if lowered.startswith(prefix):
+            return normalized[len(prefix):]
+    return normalized
+
+
+def _is_canonical_adr_source_key(repo_source_key: str) -> bool:
+    normalized = repo_source_key.replace("\\", "/").lower()
+    return normalized.endswith(".md") and (
+        normalized.startswith("docs/adr/") or normalized.startswith("adr/")
+    )
 
 
 def find_repository_root(path: Path) -> Path | None:

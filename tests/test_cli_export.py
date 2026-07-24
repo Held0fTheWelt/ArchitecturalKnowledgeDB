@@ -73,6 +73,10 @@ def test_export_target_add_list_sync_verify_round_trip(tmp_path: Path, monkeypat
     result = runner.invoke(app, ["export", "target-verify", "p", "--target", "m"])
     assert result.exit_code != 0
 
+    result = runner.invoke(app, ["export", "target-delete", "p", "m"])
+    assert result.exit_code == 0, result.output
+    assert '"deleted": true' in result.output
+
 
 def test_document_update_canonical_cli(tmp_path: Path, monkeypatch) -> None:
     repo = _seed(tmp_path, monkeypatch)
@@ -124,8 +128,36 @@ def test_document_update_canonical_cli(tmp_path: Path, monkeypatch) -> None:
             "docs/architecture/plugins/X/architecture.md",
             "--body-file",
             str(body_file),
+            "--body-origin",
+            "canonical",
         ],
     )
 
+    assert result.exit_code == 0, result.output
+    assert '"item_type": "sad"' in result.output
+
+    new_body = tmp_path / "new.md"
+    new_body.write_text(
+        "# New\n\n## 1. Goals\n\nDB-owned.\n",
+        encoding="utf-8",
+        newline="",
+    )
+    result = runner.invoke(
+        app,
+        [
+            "document",
+            "create-canonical",
+            "--project",
+            "p",
+            "--repository",
+            "Git",
+            "--source-key",
+            "docs/architecture/plugins/New/architecture.md",
+            "--body-file",
+            str(new_body),
+            "--body-origin",
+            "canonical",
+        ],
+    )
     assert result.exit_code == 0, result.output
     assert '"item_type": "sad"' in result.output

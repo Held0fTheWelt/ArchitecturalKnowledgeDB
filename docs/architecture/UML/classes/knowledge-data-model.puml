@@ -38,6 +38,21 @@ class UMLRelationship {
  relationship_uid
  relationship_type
 }
+class ExportTarget {
+ target_id
+ repository_id
+ dest_root
+ content_kinds
+ auto_export
+ enabled
+}
+class ExportDirty {
+ id
+ target_id
+ item_kind
+ item_ref
+ op
+}
 class Finding {
  finding_uid
  finding_type
@@ -50,14 +65,24 @@ class Commit {
 Project "1" *-- "*" Repository
 Project "1" *-- "*" KnowledgeItem
 Project "1" *-- "*" UMLDiagram
+Project "1" *-- "*" ExportTarget
+Project "1" *-- "*" ExportDirty
 Project "1" *-- "*" Finding
 Repository "1" *-- "*" Commit
+ExportTarget "*" --> "1" Repository : destination owner
+ExportDirty "*" --> "0..1" ExportTarget : optional target
 KnowledgeItem "1" --> "*" KnowledgeLink
 UMLDiagram "1" *-- "*" UMLElement
 UMLDiagram "1" *-- "*" UMLRelationship
 note right of KnowledgeItem
 SAD documents, preamble, frontmatter,
 sections and decisions share this spine.
-Parent identity and order live in metadata_json.
+Canonical body owners carry body_text,
+repo_source_key, and authored_in metadata.
+end note
+note right of ExportDirty
+Canonical mutation and dirty work commit together.
+Post-commit target I/O drains this queue only after
+that authoritative transaction succeeds.
 end note
 @enduml

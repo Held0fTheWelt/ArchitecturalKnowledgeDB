@@ -79,6 +79,34 @@ def notify_item_write(
 def _flush_pending(conn: Any, pending: set[tuple[str, str]]) -> None:
     if not pending:
         return
+    register = getattr(conn, "add_transaction_callback", None)
+    if callable(register):
+        state = getattr(conn, "_akdb_pending_export_targets", None)
+        if state is None:
+            state = set()
+            setattr(conn, "_akdb_pending_export_targets", state)
+
+            def after_commit() -> None:
+                queued = set(state)
+                state.clear()
+                _flush_pending_now(conn, queued)
+
+            def after_rollback() -> None:
+                state.clear()
+
+            register(
+                "akdb-export-target-flush",
+                after_commit=after_commit,
+                after_rollback=after_rollback,
+            )
+        state.update(pending)
+        return
+    _flush_pending_now(conn, pending)
+
+
+def _flush_pending_now(conn: Any, pending: set[tuple[str, str]]) -> None:
+    if not pending:
+        return
     from architectural_knowledge_db.services.import_export import ImportExportService
 
     ies = ImportExportService(conn)

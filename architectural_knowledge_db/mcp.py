@@ -5,6 +5,7 @@ from typing import Any
 
 from architectural_knowledge_db.models import (
     AdrInput,
+    CanonicalDocumentCreate,
     CanonicalDocumentUpdate,
     ContextPackRequest,
     ExploreRequest,
@@ -1124,6 +1125,40 @@ MCP_MANIFEST: dict[str, Any] = {
             },
         },
         {
+            "name": "akdb_create_canonical_document",
+            "description": "Create one new DB-canonical document body without a source-side authoring file; also creates derived SAD children or a matching structured ADR/UML record.",
+            "input_schema": {
+                "type": "object",
+                "required": [
+                    "project_id",
+                    "repository_id",
+                    "repo_source_key",
+                    "body_text",
+                    "body_origin",
+                ],
+                "properties": {
+                    "project_id": {"type": "string"},
+                    "repository_id": {"type": "string"},
+                    "repo_source_key": {"type": "string"},
+                    "body_text": {"type": "string"},
+                    "body_origin": {
+                        "type": "string",
+                        "enum": ["canonical"],
+                        "description": "Explicit assertion that body_text is canonical authoring text, never a generated mirror projection.",
+                    },
+                    "body_encoding": {
+                        "type": "string",
+                        "enum": ["utf-8", "utf-8-sig", "cp1252"],
+                        "default": "utf-8",
+                    },
+                    "sad_document_id": {
+                        "type": "string",
+                        "description": "Optional owning SAD local_id for a PlantUML document.",
+                    },
+                },
+            },
+        },
+        {
             "name": "akdb_update_canonical_document",
             "description": "Update one existing DB-canonical document body without recreating a source file; reconciles links, imported SAD children, and matching structured ADR/UML state.",
             "input_schema": {
@@ -1133,12 +1168,18 @@ MCP_MANIFEST: dict[str, Any] = {
                     "repository_id",
                     "repo_source_key",
                     "body_text",
+                    "body_origin",
                 ],
                 "properties": {
                     "project_id": {"type": "string"},
                     "repository_id": {"type": "string"},
                     "repo_source_key": {"type": "string"},
                     "body_text": {"type": "string"},
+                    "body_origin": {
+                        "type": "string",
+                        "enum": ["canonical"],
+                        "description": "Explicit assertion that body_text came from the AKDB canonical owner, never from a generated mirror.",
+                    },
                     "body_encoding": {
                         "type": "string",
                         "enum": ["utf-8", "utf-8-sig", "cp1252"],
@@ -1356,6 +1397,17 @@ class McpDispatcher:
             return ImportExportService(self.conn).export_canon(arguments["project_id"], arguments["folder"])
         if tool_name == "akdb_verify_canon":
             return ImportExportService(self.conn).verify_canon(arguments["project_id"], arguments["folder"])
+        if tool_name == "akdb_create_canonical_document":
+            project_id = arguments["project_id"]
+            payload = {
+                key: value
+                for key, value in arguments.items()
+                if key != "project_id"
+            }
+            return ImportExportService(self.conn).create_canonical_document(
+                project_id,
+                CanonicalDocumentCreate(**payload),
+            )
         if tool_name == "akdb_update_canonical_document":
             project_id = arguments["project_id"]
             payload = {

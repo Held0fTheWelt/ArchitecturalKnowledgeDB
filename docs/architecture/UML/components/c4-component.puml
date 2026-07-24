@@ -28,6 +28,8 @@ package "Governance and provenance" {
 }
 package "Pipelines" {
  component ImportExportService
+ component ExportTargetsService
+ component "ExportFlush" as ExportFlush
  component ReingestService
  component RoadmapService
  component SetupService
@@ -36,6 +38,13 @@ component "Database facade" as DB
 SadService --> KnowledgeService
 ImportExportService --> SadService
 ImportExportService --> UMLService
+ImportExportService --> ExportTargetsService : sync / verify / incremental
+KnowledgeService --> ExportFlush : notify canonical body write
+ExportFlush --> ExportTargetsService : durable dirty target
+ExportFlush --> DB : register commit callback
+DB --> ExportFlush : after commit / rollback
+ExportFlush --> ImportExportService : post-commit incremental flush
+ExportTargetsService --> DB
 AuthoringService --> KnowledgeService
 CompletenessService --> KnowledgeService
 ContextService --> SearchService

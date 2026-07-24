@@ -158,10 +158,20 @@ class SourceAreaInput(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class CanonicalDocumentCreate(BaseModel):
+    repository_id: str
+    repo_source_key: str
+    body_text: str
+    body_origin: Literal["canonical"]
+    body_encoding: Literal["utf-8", "utf-8-sig", "cp1252"] = "utf-8"
+    sad_document_id: str | None = None
+
+
 class CanonicalDocumentUpdate(BaseModel):
     repository_id: str
     repo_source_key: str
     body_text: str
+    body_origin: Literal["canonical"]
     body_encoding: Literal["utf-8", "utf-8-sig", "cp1252"] = "utf-8"
 
 

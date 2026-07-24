@@ -15,6 +15,7 @@ from architectural_knowledge_db.db.connection import initialize_database
 from architectural_knowledge_db.mcp import MCP_MANIFEST
 from architectural_knowledge_db.models import (
     AdrInput,
+    CanonicalDocumentCreate,
     CanonicalDocumentUpdate,
     ContextPackRequest,
     DefinitionInput,
@@ -581,6 +582,11 @@ def update_canonical_document(
     source_key: str = typer.Option(..., "--source-key"),
     body_file: Path | None = typer.Option(None, "--body-file"),
     body: str | None = typer.Option(None, "--body"),
+    body_origin: str = typer.Option(
+        ...,
+        "--body-origin",
+        help="Must be 'canonical'; generated mirror projections are not authoring input.",
+    ),
     encoding: str = typer.Option("utf-8", "--encoding"),
 ) -> None:
     if (body_file is None) == (body is None):
@@ -598,7 +604,46 @@ def update_canonical_document(
                     repository_id=repository_id,
                     repo_source_key=source_key,
                     body_text=body_text,
+                    body_origin=body_origin,
                     body_encoding=encoding,
+                ),
+            )
+        )
+
+
+@document_app.command("create-canonical")
+def create_canonical_document(
+    project_id: str = typer.Option(..., "--project"),
+    repository_id: str = typer.Option(..., "--repository"),
+    source_key: str = typer.Option(..., "--source-key"),
+    body_file: Path | None = typer.Option(None, "--body-file"),
+    body: str | None = typer.Option(None, "--body"),
+    body_origin: str = typer.Option(
+        ...,
+        "--body-origin",
+        help="Must be 'canonical'; generated mirror projections are not authoring input.",
+    ),
+    encoding: str = typer.Option("utf-8", "--encoding"),
+    sad_document_id: str | None = typer.Option(None, "--sad-document-id"),
+) -> None:
+    if (body_file is None) == (body is None):
+        raise typer.BadParameter("Provide exactly one of --body-file or --body.")
+    if body_file is not None:
+        with body_file.open("r", encoding=encoding, newline="") as handle:
+            body_text = handle.read()
+    else:
+        body_text = body or ""
+    with _conn() as conn:
+        _print(
+            ImportExportService(conn).create_canonical_document(
+                project_id,
+                CanonicalDocumentCreate(
+                    repository_id=repository_id,
+                    repo_source_key=source_key,
+                    body_text=body_text,
+                    body_origin=body_origin,
+                    body_encoding=encoding,
+                    sad_document_id=sad_document_id,
                 ),
             )
         )
@@ -1213,6 +1258,17 @@ def export_target_list(project: str = typer.Argument(...)) -> None:
 
     with _conn() as conn:
         _print(ExportTargetsService(conn).list_targets(project))
+
+
+@export_app.command("target-delete")
+def export_target_delete(
+    project: str = typer.Argument(...),
+    target_id: str = typer.Argument(...),
+) -> None:
+    from architectural_knowledge_db.services.export_targets import ExportTargetsService
+
+    with _conn() as conn:
+        _print(ExportTargetsService(conn).delete_target(project, target_id))
 
 
 def _resolve_targets(conn: Any, project: str, target: str | None) -> list[str]:

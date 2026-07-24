@@ -63,6 +63,7 @@ def test_akdb_update_canonical_document_tool(conn, tmp_path):
             "repository_id": "Git",
             "repo_source_key": "docs/architecture/plugins/X/architecture.md",
             "body_text": body,
+            "body_origin": "canonical",
         },
     )
 
@@ -75,6 +76,31 @@ def test_akdb_update_canonical_document_tool(conn, tmp_path):
         FROM knowledge_items
         WHERE item_uid = ?
         """,
+        (result["item_uid"],),
+    ).fetchone()
+    assert json.loads(owner["metadata_json"])["body_text"] == body
+
+
+def test_akdb_create_canonical_document_tool(conn, tmp_path):
+    _seed(conn, tmp_path)
+    body = "# New\n\n## 1. Goals\n\nDB-owned.\n"
+
+    result = McpDispatcher(conn).dispatch(
+        "akdb_create_canonical_document",
+        {
+            "project_id": "p",
+            "repository_id": "Git",
+            "repo_source_key": (
+                "docs/architecture/plugins/New/architecture.md"
+            ),
+            "body_text": body,
+            "body_origin": "canonical",
+        },
+    )
+
+    assert result["item_type"] == "sad"
+    owner = conn.execute(
+        "SELECT metadata_json FROM knowledge_items WHERE item_uid = ?",
         (result["item_uid"],),
     ).fetchone()
     assert json.loads(owner["metadata_json"])["body_text"] == body

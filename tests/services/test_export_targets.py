@@ -34,6 +34,26 @@ def test_register_is_idempotent_upsert(conn):
     assert len(svc.list_targets(pid)) == 1
 
 
+def test_delete_target_removes_target_specific_dirty_rows(conn):
+    pid = _proj(conn)
+    svc = ExportTargetsService(conn)
+    svc.register_target(
+        pid,
+        "obsolete",
+        repository_id="Git",
+        dest_root="old",
+        layout="arc42-canon",
+        content_kinds=["sad"],
+    )
+    svc.mark_dirty(pid, "sad", "old.md", target_id="obsolete")
+
+    result = svc.delete_target(pid, "obsolete")
+
+    assert result["deleted"] is True
+    assert svc.get_target(pid, "obsolete") is None
+    assert svc.peek_dirty(pid, "obsolete") == []
+
+
 def test_dirty_mark_drain_is_fifo_and_clears(conn):
     pid = _proj(conn)
     svc = ExportTargetsService(conn)

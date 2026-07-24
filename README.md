@@ -108,11 +108,19 @@ When an imported corpus has transferred authority to AKDB, update an existing ca
 stable repository path. This preserves the body owner and reconciles derived SAD, ADR, and UML state:
 
 ```powershell
-akdb document update-canonical --project my-project --repository main --source-key docs/architecture/project/system/architecture.md --body-file updated-architecture.md
+akdb document update-canonical --project my-project --repository main --source-key docs/architecture/project/system/architecture.md --body-file updated-architecture.md --body-origin canonical
 ```
 
-The equivalent FastAPI route and `akdb_update_canonical_document` MCP tool accept the complete body
-directly. The operation never writes the retired source path or generated mirror.
+Create a new canonical body directly in AKDB when no owner exists:
+
+```powershell
+akdb document create-canonical --project my-project --repository main --source-key docs/ADR/Project/system/adr-system-0001-authority.md --body-file new-adr.md --body-origin canonical
+```
+
+The equivalent FastAPI routes and `akdb_create_canonical_document` /
+`akdb_update_canonical_document` MCP tools accept the complete body directly. The explicit origin
+assertion prevents a generated projection from becoming the editing source. Supported database
+writes commit before target publication; rollback writes no mirror.
 
 ## Self-documentation
 
@@ -121,6 +129,7 @@ directly. The operation never writes the retired source path or generated mirror
 
 ```powershell
 python -m architectural_knowledge_db.cli sad export --project architectural-knowledge-db --folder docs/architecture
+python -m architectural_knowledge_db.cli adr export --project architectural-knowledge-db --folder docs/adr
 ```
 
 The generated `.akdb-sad-export.json` manifest lets a later full export remove stale managed files

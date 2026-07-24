@@ -50,6 +50,46 @@ end note
     assert any(item["details"]["name"] == "KnowledgeService" for item in pack["uml_elements"])
 
 
+def test_plantuml_kind_prefers_sequence_when_actor_and_participant_coexist(
+    conn, tmp_path: Path
+) -> None:
+    add_project(conn, "akdb")
+    uml_dir = tmp_path / "uml"
+    uml_dir.mkdir()
+    (uml_dir / "sequence.puml").write_text(
+        "@startuml\n"
+        "actor Maintainer\n"
+        "participant Service\n"
+        "Maintainer -> Service : call\n"
+        "@enduml\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    UMLService(conn).import_diagrams("akdb", uml_dir)
+
+    assert UMLService(conn).get_diagram("akdb", "sequence")[
+        "diagram_kind"
+    ] == "sequence"
+
+
+def test_plantuml_component_kind_is_not_unknown(conn, tmp_path: Path) -> None:
+    add_project(conn, "akdb")
+    uml_dir = tmp_path / "uml"
+    uml_dir.mkdir()
+    (uml_dir / "components.puml").write_text(
+        "@startuml\ncomponent API\ncomponent Service\nAPI --> Service\n@enduml\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    UMLService(conn).import_diagrams("akdb", uml_dir)
+
+    assert UMLService(conn).get_diagram("akdb", "components")[
+        "diagram_kind"
+    ] == "component"
+
+
 def test_uml_import_auto_exports_original_path_and_raw_text(conn, tmp_path: Path, monkeypatch) -> None:
     add_project(conn, "akdb")
     mirror = tmp_path / "mirror"

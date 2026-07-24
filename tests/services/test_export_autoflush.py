@@ -41,6 +41,8 @@ def test_single_upsert_autoflushes_to_mirror(conn, tmp_path):
             },
         ),
     )
+    assert not (dest / "ADR").exists()
+    conn.commit()
     mirrored = dest / "ADR" / "Plugins" / "ADR-0001-use-x.md"
     assert mirrored.exists()
     assert mirrored.read_bytes() == b"# ADR-0001: Use X\n\nv2\n"
@@ -67,6 +69,8 @@ def test_bulk_import_flushes_once(conn, tmp_path, monkeypatch):
 
     ImportExportService(conn).import_documents("p", tmp_path / "docs" / "architecture", include=["**/*"])
 
+    assert calls["n"] == 0
+    conn.commit()
     assert calls["n"] == 1          # one coalesced flush, not five
     for i in range(5):
         assert (dest / "plugins" / f"P{i}" / "architecture.md").exists()
@@ -92,6 +96,31 @@ def test_deferred_export_context_manager_coalesces_across_calls(conn, tmp_path):
             )
         # Not yet flushed -- still inside the deferred block.
         assert not (dest / "ADR").exists()
-    # Flushed exactly once on exit.
+    # The context coalesces work, but the filesystem projection waits until
+    # the authoritative database transaction commits.
+    assert not (dest / "ADR").exists()
+    conn.commit()
     for i in range(3):
         assert (dest / "ADR" / "Plugins" / f"ADR-000{i}-d.md").exists()
+
+
+def test_rollback_discards_pending_export(conn, tmp_path):
+    dest = _project_with_target(conn, tmp_path)
+    conn.commit()
+
+    KnowledgeService(conn).upsert_adr(
+        "p",
+        AdrInput(
+            adr_id="ADR-ROLLBACK-0001",
+            title="Never mirror rolled-back state",
+            metadata={
+                "repo_source_key": "docs/ADR/Plugins/ADR-ROLLBACK-0001.md",
+                "body_text": "# Rolled back\n",
+                "body_encoding": "utf-8",
+            },
+        ),
+    )
+    conn.rollback()
+
+    assert not (dest / "ADR" / "Plugins" / "ADR-ROLLBACK-0001.md").exists()
+    assert not KnowledgeService(conn).list_adrs("p", limit=100)

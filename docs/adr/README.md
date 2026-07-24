@@ -13,5 +13,6 @@ hand-edit their decision content.
 | [ADR-AKDB-0002](adr-akdb-0002-bind-relative-export-destinations-to-registered-repositories.md) | Bind relative export destinations to registered repositories | Accepted |
 | [ADR-AKDB-0003](adr-akdb-0003-project-canonical-links-into-target-mirrors.md) | Project canonical links into target mirrors | Accepted |
 | [ADR-AKDB-0004](adr-akdb-0004-update-imported-canonical-documents-by-stable-db-identity.md) | Update imported canonical documents by stable DB identity | Accepted |
+| [ADR-AKDB-0005](adr-akdb-0005-db-native-canonical-creation-and-commit-bound-publication.md) | DB-native canonical creation and commit-bound publication | Accepted |
 
 Public operator guidance: [operations/postgres.md](../operations/postgres.md).

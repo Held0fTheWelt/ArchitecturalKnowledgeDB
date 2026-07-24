@@ -61,10 +61,18 @@ After a corpus transfers authority to AKDB, do not recreate a retired source tre
 file. Update the existing canonical body by stable identity:
 
 ```powershell
-akdb document update-canonical --project my-project --repository main --source-key docs/architecture/project/system/architecture.md --body-file updated-architecture.md
+akdb document update-canonical --project my-project --repository main --source-key docs/architecture/project/system/architecture.md --body-file updated-architecture.md --body-origin canonical
 ```
 
-AKDB rejects unsafe, missing, or ambiguous identities and reconciles derived SAD, ADR, and UML state.
+For a new body owner, use the creation surface instead:
+
+```powershell
+akdb document create-canonical --project my-project --repository main --source-key UML/Project/system/sequence/primary.puml --body-file primary.puml --body-origin canonical --sad-document-id project-system-architecture
+```
+
+AKDB rejects unsafe, duplicate, missing, or ambiguous identities, rejects exact generated-projection
+feedback on update, and reconciles derived SAD, ADR, and UML state. Target publication starts only
+after the authoritative database transaction commits.
 
 ## Author SAD And UML In AKDB
 
