@@ -24,14 +24,27 @@ def test_spec_validate_blocks(conn):
 
 
 def test_spec_validate_ok_when_complete(conn):
-    from architectural_knowledge_db.models import SpecInput, SourceAreaInput, KnowledgeLinkInput
+    from architectural_knowledge_db.models import (
+        KnowledgeLinkInput,
+        SadDocumentInput,
+        SourceAreaInput,
+        SpecInput,
+    )
     from architectural_knowledge_db.services.knowledge import KnowledgeService
+    from architectural_knowledge_db.services.sad import SadService
     from architectural_knowledge_db.services.uml import UMLService
     from architectural_knowledge_db.services.completeness import CompletenessService
     add_project(conn, "p")
     ks = KnowledgeService(conn)
     uml = UMLService(conn)
     ks.upsert_source_area("p", SourceAreaInput(source_area_id="SA", title="src", path_patterns=["src/**"]))
+    SadService(conn).upsert_document(
+        "p",
+        SadDocumentInput(
+            document_id="comp",
+            title="Reader document sharing the diagram local id",
+        ),
+    )
     uml.upsert_diagram("p", {"diagram_id": "comp", "title": "comp", "diagram_kind": "c4-component",
                              "model": {}, "elements": [{"element_type": "Component", "name": "Scanner"}],
                              "relationships": []})

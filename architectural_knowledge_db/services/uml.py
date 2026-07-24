@@ -418,6 +418,7 @@ class UMLService:
             metadata=item_metadata,
         )
         self.knowledge._index_item(item_uid)
+        self._refresh_body_owner(project_id, diagram_id)
         return self.get_diagram(project_id, diagram_id)
 
     def _require_available_source_key(

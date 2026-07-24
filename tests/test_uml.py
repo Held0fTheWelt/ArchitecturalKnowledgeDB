@@ -251,6 +251,13 @@ def test_uml_full_db_native_crud(conn, tmp_path: Path) -> None:
         relationship["relationship_uid"],
         UMLRelationshipUpdate(relationship_type="dependency", label="uses"),
     )
+    conn.execute(
+        """
+        UPDATE knowledge_items
+        SET metadata_json = json_remove(metadata_json, '$.body_text')
+        WHERE item_uid = 'akdb:uml_diagram:db-native'
+        """
+    )
     service.update_diagram(
         "akdb",
         "db-native",

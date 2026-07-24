@@ -52,7 +52,18 @@ class CompletenessService:
         except ValueError:
             pass
         row = self.conn.execute(
-            "SELECT item_uid FROM knowledge_items WHERE project_id = ? AND local_id = ? LIMIT 1",
+            """
+            SELECT item_uid
+            FROM knowledge_items
+            WHERE project_id = ? AND local_id = ?
+            ORDER BY CASE item_type
+                WHEN 'uml_diagram' THEN 0
+                WHEN 'uml_element' THEN 1
+                ELSE 2
+            END,
+            item_uid
+            LIMIT 1
+            """,
             (project_id, ref),
         ).fetchone()
         return self.knowledge.get_item_by_uid(row["item_uid"]) if row else None
