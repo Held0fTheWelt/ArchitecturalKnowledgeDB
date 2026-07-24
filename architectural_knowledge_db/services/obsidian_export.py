@@ -14,8 +14,9 @@ import yaml
 
 from architectural_knowledge_db.services.markdown_anchors import strip_code_fences
 
-# Characters illegal / ambiguous in Obsidian note basenames.
-_UNSAFE_NOTE_CHARS = re.compile(r"[]\[#|^\\/:]")
+# Characters illegal on Windows filesystems and/or ambiguous in Obsidian basenames.
+# Includes Win32 reserved: <>:"/\|?* plus Obsidian link punctuation []#^
+_UNSAFE_NOTE_CHARS = re.compile(r'[]\[#|^<>:"/\\|?*]')
 _MD_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 _FRONTMATTER_KEYS = ("kind", "status", "repo", "system", "source_key", "aliases", "tags", "links")
 
@@ -77,9 +78,9 @@ class ObsidianNameRegistry:
             name = base
         else:
             name = self._qualified_name(holder)
-            # If still taken (same repo/section as another), append uid.
+            # If still taken (same repo/section as another), append sanitized uid.
             if name in self._taken:
-                name = f"{name} · {item_uid}"
+                name = f"{name} · {_safe_base(item_uid)}"
         self._uid_to_name[item_uid] = name
         self._taken.add(name)
         return name
@@ -88,10 +89,10 @@ class ObsidianNameRegistry:
         return self._uid_to_name.get(item_uid)
 
     def _qualified_name(self, holder: dict[str, Any]) -> str:
-        repo = holder["repo"] or "unknown"
+        repo = _safe_base(holder["repo"] or "unknown")
         sk = holder["section_key"]
         if sk:
-            return f"{holder['base']} ({repo} · {sk})"
+            return f"{holder['base']} ({repo} · {_safe_base(str(sk))})"
         return f"{holder['base']} ({repo})"
 
 

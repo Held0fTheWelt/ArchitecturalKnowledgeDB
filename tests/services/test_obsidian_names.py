@@ -38,3 +38,33 @@ def test_registry_is_unique_stable_and_qualifies_collisions():
         section_key=None,
     )
     assert (a, b) == (a2, b2)
+
+
+def test_registry_uid_suffix_is_filesystem_safe():
+    """Windows forbids ':' (and <>"|?*) in filenames; uid suffixes must be sanitized."""
+    reg = ObsidianNameRegistry()
+    reg.register(
+        item_uid="proj:sad:a",
+        item_type="sad",
+        title="Dup",
+        repo="Git",
+        section_key="00",
+    )
+    reg.register(
+        item_uid="proj:sad:b",
+        item_type="sad",
+        title="Dup",
+        repo="Git",
+        section_key="00",
+    )
+    # Third collision shares base+repo+section → appends item_uid
+    name = reg.register(
+        item_uid="proj:sad:c:with:colons",
+        item_type="sad",
+        title="Dup",
+        repo="Git",
+        section_key="00",
+    )
+    forbidden = '<>:"|?*\\/'
+    assert ":" not in name
+    assert not any(ch in name for ch in forbidden)
