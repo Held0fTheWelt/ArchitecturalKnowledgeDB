@@ -8,10 +8,14 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
-from typing import Any
+from typing import Any, Callable
+
+import yaml
 
 # Characters illegal / ambiguous in Obsidian note basenames.
 _UNSAFE_NOTE_CHARS = re.compile(r"[]\[#|^\\/:]")
+_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+_FRONTMATTER_KEYS = ("kind", "status", "repo", "system", "source_key", "aliases", "tags", "links")
 
 
 def _safe_base(title: str) -> str:
@@ -75,3 +79,95 @@ class ObsidianNameRegistry:
         if sk:
             return f"{holder['base']} ({repo} · {sk})"
         return f"{holder['base']} ({repo})"
+
+
+def build_frontmatter(
+    *,
+    kind: str,
+    status: str | None,
+    repo: str,
+    system: str | None,
+    source_key: str | None,
+    aliases: list[str],
+    tags: list[str],
+    links: list[str],
+) -> str:
+    """Emit a deterministic YAML frontmatter block (D5).
+
+    ``status`` is omitted entirely when ``None`` (presence-based kinds).
+    ``links`` render as a YAML list of double-quoted ``"[[Name]]"`` strings.
+    """
+    payload: dict[str, Any] = {
+        "kind": kind,
+        "repo": repo,
+        "system": system,
+        "source_key": source_key,
+        "aliases": list(aliases),
+        "tags": list(tags),
+        "links": list(links),
+    }
+    if status is not None:
+        payload["status"] = status
+    ordered: dict[str, Any] = {}
+    for key in _FRONTMATTER_KEYS:
+        if key == "status" and status is None:
+            continue
+        ordered[key] = payload[key]
+
+    class _QuotedListDumper(yaml.SafeDumper):
+        pass
+
+    def _repr_str(dumper: yaml.Dumper, data: str) -> Any:
+        # Force double quotes for wikilink strings; leave other scalars plain when safe.
+        if data.startswith("[[") and data.endswith("]]"):
+            return dumper.represent_scalar("tag:yaml.org,2002:str", data, style='"')
+        return dumper.represent_scalar("tag:yaml.org,2002:str", data)
+
+    _QuotedListDumper.add_representer(str, _repr_str)
+    body = yaml.dump(
+        ordered,
+        Dumper=_QuotedListDumper,
+        sort_keys=False,
+        allow_unicode=True,
+        default_flow_style=False,
+        width=10_000,
+    )
+    return f"---\n{body.rstrip()}\n---\n"
+
+
+def rewrite_links(
+    body_text: str,
+    *,
+    registry: ObsidianNameRegistry,
+    resolve_target: Callable[[str], str | None],
+) -> tuple[str, list[str]]:
+    """Rewrite markdown links to Obsidian wikilinks; unresolved → plain text (§3.3).
+
+    ``resolve_target(href)`` returns a note name (optionally ``#Heading``) or ``None``.
+    Fragments are left for the resolver; callers may normalize via ``markdown_anchors``.
+    """
+    del registry  # reserved for future registry-assisted resolution
+    unresolved: list[str] = []
+
+    def _replace(match: re.Match[str]) -> str:
+        text, href = match.group(1), match.group(2)
+        target = resolve_target(href)
+        if target is None:
+            unresolved.append(href)
+            return text
+        return f"[[{target}]]"
+
+    rewritten = _MD_LINK_RE.sub(_replace, body_text)
+    return rewritten, unresolved
+
+
+def render_uml_note(item: dict[str, Any], *, registry: ObsidianNameRegistry) -> str:
+    """Embed PlantUML source in a fenced ``plantuml`` block (D6)."""
+    del registry
+    metadata = item.get("metadata") or {}
+    source = metadata.get("body_text") or ""
+    # Guard against a source that already contains a closing fence.
+    safe = source.replace("```", "'''")
+    if not safe.endswith("\n"):
+        safe = safe + "\n"
+    return f"```plantuml\n{safe}```\n"
