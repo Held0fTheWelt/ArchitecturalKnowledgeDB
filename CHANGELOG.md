@@ -24,6 +24,15 @@ versions follow [Semantic Versioning](https://semver.org/).
   `docs/architecture` is its deterministic, versioned projection.
 - Self-repository provenance is registered read-only for code/architecture drift checks.
 
+### Fixed
+
+- DB-native SAD mutations now retain a deterministic `docs/architecture/<source_key>`
+  `repo_source_key` and refresh the document's single canonical `body_text` owner, so an edit cannot
+  orphan, prune, or leave a stale canon projection.
+- DB-native UML create/update now retains its canonical `source_key` as `repo_source_key`. Newly
+  authored diagrams own an exportable body, while structured mutations refresh an existing canonical
+  body owner without creating a second authority.
+
 ## [0.3.0] - 2026-07-23
 
 Arc42 self-documentation release: AKDB can export a deterministic `architecture.md` + `UML/`

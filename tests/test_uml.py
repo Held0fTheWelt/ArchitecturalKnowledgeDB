@@ -14,6 +14,7 @@ from architectural_knowledge_db.models import (
     UMLRelationshipUpdate,
 )
 from architectural_knowledge_db.services.context import ContextPackBuilder
+from architectural_knowledge_db.services.import_export import ImportExportService
 from architectural_knowledge_db.services.knowledge import KnowledgeService
 from architectural_knowledge_db.services.uml import UMLService
 from tests.conftest import add_project
@@ -225,6 +226,10 @@ def test_uml_full_db_native_crud(conn, tmp_path: Path) -> None:
         ),
     )
     assert diagram["source_uri"] == "akdb://akdb/uml/db-native"
+    assert diagram["model"]["repo_source_key"] == "UML/components/db-native.puml"
+    item = service.knowledge.get_item_by_uid("akdb:uml_diagram:db-native")
+    assert item["metadata"]["repo_source_key"] == "UML/components/db-native.puml"
+    assert item["metadata"]["body_text"].startswith("@startuml")
 
     a = service.add_element(
         "akdb", UMLElementInput(diagram_id="db-native", element_id="db-native:a", element_type="component", name="A")
@@ -254,6 +259,16 @@ def test_uml_full_db_native_crud(conn, tmp_path: Path) -> None:
     exported = service.export_diagrams("akdb", tmp_path / "out")
     text = Path(exported["files"][0]).read_text(encoding="utf-8")
     assert "a ..> b : uses" in text
+    owner = service.knowledge.get_item_by_uid("akdb:uml_diagram:db-native")
+    assert owner["metadata"]["repo_source_key"] == (
+        "UML/components/db-native.puml"
+    )
+    assert owner["metadata"]["body_text"] == text
+    mirror = ImportExportService(conn)._expected_mirror_files(
+        "akdb",
+        tmp_path / "mirror",
+    )
+    assert mirror["UML/components/db-native.puml"][0] == text
 
     service.delete_relationship("akdb", relationship["relationship_uid"])
     service.delete_element("akdb", b["element_id"])

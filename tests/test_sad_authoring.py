@@ -68,8 +68,15 @@ def test_sad_crud_is_db_native_and_exported(conn, tmp_path: Path) -> None:
 
     document = service.get_document("p", "root")
     assert document["source_uri"] == "akdb://p/sad/root"
+    assert document["metadata"]["repo_source_key"] == "docs/architecture/architecture.md"
     assert document["sections"][0]["source_uri"] == "akdb://p/sad/root"
+    assert (
+        document["sections"][0]["metadata"]["repo_source_key"]
+        == "docs/architecture/architecture.md"
+    )
     assert document["decisions"][0]["status"] == "accepted"
+    assert "## 1. Introduction" in document["metadata"]["body_text"]
+    assert "### D1: DB-native architecture" in document["metadata"]["body_text"]
 
     out = tmp_path / "out"
     ImportExportService(conn).export_sad("p", out)
@@ -80,8 +87,11 @@ def test_sad_crud_is_db_native_and_exported(conn, tmp_path: Path) -> None:
 
     service.delete_decision("p", "root", "D1")
     service.delete_section("p", "root", "intro")
-    assert service.get_document("p", "root")["decisions"] == []
-    assert [item["title"] for item in service.get_document("p", "root")["sections"]] == ["9. Decisions"]
+    current = service.get_document("p", "root")
+    assert current["decisions"] == []
+    assert [item["title"] for item in current["sections"]] == ["9. Decisions"]
+    assert "### D1:" not in current["metadata"]["body_text"]
+    assert "## 1. Introduction" not in current["metadata"]["body_text"]
 
 
 def test_multi_sad_export_preserves_document_hierarchy(conn, tmp_path: Path) -> None:
@@ -112,6 +122,42 @@ def test_multi_sad_export_preserves_document_hierarchy(conn, tmp_path: Path) -> 
     assert (
         tmp_path / "out" / "subsystems" / "agent-authoring" / "UML" / "context.puml"
     ).is_file()
+
+
+def test_sad_upsert_preserves_canon_tree_placement(conn, tmp_path: Path) -> None:
+    add_project(conn, "p")
+    service = SadService(conn)
+
+    service.upsert_document(
+        "p",
+        SadDocumentInput(
+            document_id="workflow",
+            title="Workflow architecture",
+            source_key="project/workflow/architecture.md",
+            preamble_md="# Workflow architecture",
+        ),
+    )
+    updated = service.upsert_document(
+        "p",
+        SadDocumentInput(
+            document_id="workflow",
+            title="Workflow architecture",
+            source_key="project/workflow/architecture.md",
+            preamble_md="# Workflow architecture\n\nReconciled.",
+        ),
+    )
+
+    expected = "docs/architecture/project/workflow/architecture.md"
+    assert updated["metadata"]["repo_source_key"] == expected
+    assert updated["preamble"][0]["metadata"]["repo_source_key"] == expected
+    assert "Reconciled." in updated["metadata"]["body_text"]
+    mirror = ImportExportService(conn)._expected_mirror_files(
+        "p",
+        tmp_path / "mirror",
+    )
+    assert mirror["project/workflow/architecture.md"][0].endswith(
+        "# Workflow architecture\n\nReconciled.\n"
+    )
 
 
 def test_sad_source_key_cannot_escape_export_root(conn) -> None:

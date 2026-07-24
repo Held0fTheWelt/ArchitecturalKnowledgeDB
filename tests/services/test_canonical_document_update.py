@@ -273,6 +273,16 @@ def test_create_canonical_plantuml_creates_matching_structured_diagram(
     assert diagram["model"]["sad_document_id"] == (
         "plugins-newplugin-architecture"
     )
+    structured = UMLService(conn).knowledge.get_item_by_uid(
+        f"p:uml_diagram:{diagram['diagram_id']}"
+    )
+    assert "body_text" not in structured["metadata"]
+    assert len(
+        ImportExportService(conn)._body_owner_rows(
+            "p",
+            "UML/Plugins/NewPlugin/sequence/new-sequence.puml",
+        )
+    ) == 1
 
 
 def test_create_canonical_mermaid_creates_matching_structured_diagram(

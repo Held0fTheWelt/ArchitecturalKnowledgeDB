@@ -27,6 +27,13 @@ def _safe_source_key(value: str) -> str:
     return key
 
 
+def _canonical_repo_source_key(source_key: str) -> str:
+    normalized = source_key.replace("\\", "/").strip("/")
+    if normalized.lower().startswith("docs/architecture/"):
+        return normalized
+    return f"docs/architecture/{normalized}"
+
+
 def _local_token(value: str) -> str:
     token = re.sub(r"[^A-Za-z0-9_.-]+", "-", value.strip()).strip("-").lower()
     if not token:
@@ -93,6 +100,7 @@ class SadService:
                 f"SAD source_key is already used by document {collision['local_id']}: {source_key}"
             )
         uri = sad_uri(project_id, request.document_id)
+        repo_source_key = _canonical_repo_source_key(source_key)
         uid = self.knowledge._upsert_item(
             project_id=project_id,
             space_id=None,
@@ -106,6 +114,7 @@ class SadService:
             metadata={
                 "document_id": request.document_id,
                 "source_key": source_key,
+                "repo_source_key": repo_source_key,
                 "format": "markdown",
                 "doc_kind": "sad",
                 "authored_in": "akdb",
@@ -116,7 +125,7 @@ class SadService:
             self.set_preamble(project_id, request.document_id, request.preamble_md)
         if request.frontmatter:
             self.set_frontmatter(project_id, request.document_id, request.frontmatter)
-        return self.get_document(project_id, request.document_id)
+        return self._refresh_body_owner(project_id, request.document_id)
 
     def set_preamble(self, project_id: str, document_id: str, body_md: str) -> dict[str, Any]:
         parent = self.get_document(project_id, document_id)
@@ -133,7 +142,9 @@ class SadService:
             metadata=self._child_metadata(parent, {"body_md": body_md.strip("\n")}),
         )
         self.knowledge._index_item(uid)
-        return self.knowledge.get_item_by_uid(uid)
+        item = self.knowledge.get_item_by_uid(uid)
+        self._refresh_body_owner(project_id, document_id)
+        return item
 
     def set_frontmatter(
         self, project_id: str, document_id: str, frontmatter: dict[str, Any]
@@ -152,7 +163,9 @@ class SadService:
             metadata=self._child_metadata(parent, {"frontmatter": frontmatter}),
         )
         self.knowledge._index_item(uid)
-        return self.knowledge.get_item_by_uid(uid)
+        item = self.knowledge.get_item_by_uid(uid)
+        self._refresh_body_owner(project_id, document_id)
+        return item
 
     def upsert_section(self, project_id: str, request: SadSectionInput) -> dict[str, Any]:
         parent = self.get_document(project_id, request.document_id)
@@ -179,7 +192,9 @@ class SadService:
             ),
         )
         self.knowledge._index_item(uid)
-        return self.knowledge.get_item_by_uid(uid)
+        item = self.knowledge.get_item_by_uid(uid)
+        self._refresh_body_owner(project_id, request.document_id)
+        return item
 
     def delete_section(self, project_id: str, document_id: str, section_id: str) -> dict[str, Any]:
         return self._delete_child(
@@ -210,7 +225,9 @@ class SadService:
             ),
         )
         self.knowledge._index_item(uid)
-        return self.knowledge.get_item_by_uid(uid)
+        item = self.knowledge.get_item_by_uid(uid)
+        self._refresh_body_owner(project_id, request.document_id)
+        return item
 
     def delete_decision(self, project_id: str, document_id: str, decision_id: str) -> dict[str, Any]:
         return self._delete_child(
@@ -255,12 +272,49 @@ class SadService:
 
     @staticmethod
     def _child_metadata(parent: dict[str, Any], extra: dict[str, Any]) -> dict[str, Any]:
+        parent_metadata = parent.get("metadata") or {}
         return {
-            "source_key": (parent.get("metadata") or {}).get("source_key", "architecture.md"),
+            "source_key": parent_metadata.get("source_key", "architecture.md"),
+            "repo_source_key": parent_metadata.get(
+                "repo_source_key",
+                _canonical_repo_source_key(
+                    parent_metadata.get("source_key", "architecture.md")
+                ),
+            ),
             "parent_item_uid": parent["item_uid"],
             "authored_in": "akdb",
             **extra,
         }
+
+    def _refresh_body_owner(
+        self,
+        project_id: str,
+        document_id: str,
+    ) -> dict[str, Any]:
+        from architectural_knowledge_db.services.import_export import (
+            render_sad_document_text,
+        )
+
+        document = self.get_document(project_id, document_id)
+        metadata = {
+            **(document.get("metadata") or {}),
+            "body_text": render_sad_document_text(document),
+            "body_encoding": "utf-8",
+        }
+        uid = self.knowledge._upsert_item(
+            project_id=project_id,
+            space_id=document["space_id"],
+            item_type="sad",
+            local_id=document_id,
+            title=document["title"],
+            status=document["status"],
+            authority_level=document["authority_level"],
+            summary=document["summary"],
+            source_uri=document["source_uri"],
+            metadata=metadata,
+        )
+        self.knowledge._index_item(uid)
+        return self.get_document(project_id, document_id)
 
     def _delete_child(
         self, project_id: str, document_id: str, item_type: str, local_id: str
@@ -276,6 +330,7 @@ class SadService:
         if row is None or parent["item_uid"] not in row["metadata_json"]:
             raise ValueError(f"Unknown {item_type} in SAD {document_id}: {local_id}")
         self._delete_item(row["item_uid"])
+        self._refresh_body_owner(project_id, document_id)
         return {"project_id": project_id, "document_id": document_id, "local_id": local_id, "deleted": True}
 
     def _delete_item(self, item_uid: str) -> None:

@@ -134,6 +134,39 @@ class UMLService:
                 parsed.get("diagram_kind", "unknown"),
             ),
         )
+        item_uid = stable_uid(project_id, "uml_diagram", parsed["diagram_id"])
+        item_metadata = {
+            "diagram_uid": diagram_uid,
+            "source_key": parsed.get("model", {}).get("source_key"),
+            "repo_source_key": parsed.get("model", {}).get("repo_source_key"),
+            "sad_document_id": parsed.get("model", {}).get("sad_document_id"),
+            "authored_in": parsed.get("model", {}).get("authored_in"),
+        }
+        repo_source_key = item_metadata.get("repo_source_key")
+        external_body_owners = [
+            owner
+            for owner in self._body_owners(project_id, repo_source_key)
+            if owner["item_uid"] != item_uid
+        ]
+        if len(external_body_owners) > 1:
+            owner_ids = ", ".join(
+                owner["item_uid"] for owner in external_body_owners
+            )
+            raise ValueError(
+                "Multiple canonical UML body owners for repo_source_key "
+                f"{repo_source_key}: {owner_ids}"
+            )
+        if (
+            repo_source_key
+            and item_metadata.get("authored_in") == "akdb"
+            and not external_body_owners
+        ):
+            item_metadata.update(
+                {
+                    "body_text": parsed.get("raw_source") or "",
+                    "body_encoding": "utf-8",
+                }
+            )
         item_uid = self.knowledge._upsert_item(
             project_id=project_id,
             space_id=space_id,
@@ -144,13 +177,7 @@ class UMLService:
             authority_level="current_uml_model",
             summary=f"{parsed.get('diagram_kind', 'unknown')} PlantUML diagram",
             source_uri=parsed.get("source_uri"),
-            metadata={
-                "diagram_uid": diagram_uid,
-                "source_key": parsed.get("model", {}).get("source_key"),
-                "repo_source_key": parsed.get("model", {}).get("repo_source_key"),
-                "sad_document_id": parsed.get("model", {}).get("sad_document_id"),
-                "authored_in": parsed.get("model", {}).get("authored_in"),
-            },
+            metadata=item_metadata,
         )
         self.knowledge._index_item(item_uid)
         if parsed.get("model", {}).get("repo_source_key"):
@@ -241,6 +268,7 @@ class UMLService:
             else f"UML/{safe_filename(request.diagram_id)}.puml"
         )
         model["source_key"] = _safe_authored_source_key(source_key)
+        model.setdefault("repo_source_key", model["source_key"])
         self._require_available_source_key(project_id, request.diagram_id, model["source_key"])
         self._require_sad_document(project_id, model.get("sad_document_id"))
         raw = request.raw_source
@@ -316,17 +344,30 @@ class UMLService:
                 if changes.sad_document_id is not None
                 else (current.get("model") or {}).get("sad_document_id")
             )
-            current_repo_source_key = (current.get("model") or {}).get(
-                "repo_source_key"
+            current_model = current.get("model") or {}
+            current_repo_source_key = current_model.get("repo_source_key")
+            if (
+                changes.source_key is not None
+                and current_model.get("authored_in") == "akdb"
+                and current_repo_source_key == current_model.get("source_key")
+            ):
+                current_repo_source_key = source_key
+            parsed["model"]["repo_source_key"] = (
+                current_repo_source_key or source_key
             )
-            if current_repo_source_key:
-                parsed["model"]["repo_source_key"] = current_repo_source_key
             parsed["model"]["authored_in"] = "akdb"
             return self.upsert_diagram(project_id, parsed)
 
         model = dict(current.get("model") or {})
         if changes.source_key is not None:
+            if (
+                model.get("authored_in") == "akdb"
+                and model.get("repo_source_key") == model.get("source_key")
+            ):
+                model["repo_source_key"] = source_key
             model["source_key"] = source_key
+        if not model.get("repo_source_key"):
+            model["repo_source_key"] = source_key
         if changes.sad_document_id is not None:
             model["sad_document_id"] = changes.sad_document_id
         model["authored_in"] = "akdb"
@@ -352,26 +393,29 @@ class UMLService:
             ),
         )
         item_uid = stable_uid(project_id, "uml_diagram", diagram_id)
-        self.conn.execute(
-            """
-            UPDATE knowledge_items
-            SET title = COALESCE(?, title), source_uri = ?, summary = ?, metadata_json = ?
-            WHERE item_uid = ?
-            """,
-            (
-                changes.title,
-                f"akdb://{project_id}/uml/{diagram_id}",
-                f"{changes.diagram_kind or current['diagram_kind']} {changes.notation or current['notation']} diagram",
-                dumps(
-                    {
-                        "diagram_uid": current["diagram_uid"],
-                        "source_key": model.get("source_key"),
-                        "sad_document_id": model.get("sad_document_id"),
-                        "authored_in": "akdb",
-                    }
-                ),
-                item_uid,
+        current_item = self.knowledge.get_item_by_uid(item_uid)
+        item_metadata = {
+            **(current_item.get("metadata") or {}),
+            "diagram_uid": current["diagram_uid"],
+            "source_key": model.get("source_key"),
+            "repo_source_key": model.get("repo_source_key"),
+            "sad_document_id": model.get("sad_document_id"),
+            "authored_in": "akdb",
+        }
+        self.knowledge._upsert_item(
+            project_id=project_id,
+            space_id=current_item["space_id"],
+            item_type="uml_diagram",
+            local_id=diagram_id,
+            title=changes.title or current_item["title"],
+            status=current_item["status"],
+            authority_level=current_item["authority_level"],
+            summary=(
+                f"{changes.diagram_kind or current['diagram_kind']} "
+                f"{changes.notation or current['notation']} diagram"
             ),
+            source_uri=f"akdb://{project_id}/uml/{diagram_id}",
+            metadata=item_metadata,
         )
         self.knowledge._index_item(item_uid)
         return self.get_diagram(project_id, diagram_id)
@@ -768,6 +812,73 @@ class UMLService:
             """,
             (dumps(model), project_id, diagram_id),
         )
+        self._refresh_body_owner(project_id, diagram_id)
+
+    def _body_owners(
+        self,
+        project_id: str,
+        repo_source_key: str | None,
+    ) -> list[dict[str, Any]]:
+        if not repo_source_key:
+            return []
+        rows = self.conn.execute(
+            """
+            SELECT item_uid
+            FROM knowledge_items
+            WHERE project_id = ?
+              AND json_extract(metadata_json, '$.repo_source_key') = ?
+              AND json_extract(metadata_json, '$.body_text') IS NOT NULL
+            ORDER BY item_uid
+            """,
+            (project_id, repo_source_key),
+        ).fetchall()
+        return [
+            self.knowledge.get_item_by_uid(row["item_uid"])
+            for row in rows
+        ]
+
+    def _refresh_body_owner(self, project_id: str, diagram_id: str) -> None:
+        diagram = self.get_diagram(project_id, diagram_id)
+        model = diagram.get("model") or {}
+        repo_source_key = model.get("repo_source_key")
+        if not repo_source_key:
+            return
+        item_uid = stable_uid(project_id, "uml_diagram", diagram_id)
+        owners = self._body_owners(project_id, repo_source_key)
+        if len(owners) > 1:
+            owner_ids = ", ".join(owner["item_uid"] for owner in owners)
+            raise ValueError(
+                "Multiple canonical UML body owners for repo_source_key "
+                f"{repo_source_key}: {owner_ids}"
+            )
+        if owners:
+            owner = owners[0]
+        elif model.get("authored_in") == "akdb":
+            owner = self.knowledge.get_item_by_uid(item_uid)
+        else:
+            return
+        metadata = {
+            **(owner.get("metadata") or {}),
+            "source_key": model.get("source_key"),
+            "repo_source_key": repo_source_key,
+            "sad_document_id": model.get("sad_document_id"),
+            "authored_in": model.get("authored_in"),
+            "body_text": self.render_diagram(project_id, diagram_id),
+            "body_encoding": "utf-8",
+        }
+        self.knowledge._upsert_item(
+            project_id=project_id,
+            space_id=owner["space_id"],
+            item_type=owner["item_type"],
+            local_id=owner["local_id"],
+            title=owner["title"],
+            status=owner["status"],
+            authority_level=owner["authority_level"],
+            summary=owner["summary"],
+            source_uri=owner["source_uri"],
+            metadata=metadata,
+        )
+        self.knowledge._index_item(owner["item_uid"])
 
 
 def parse_plantuml(text: str, source_uri: str | None = None, source_key: str | None = None) -> dict[str, Any]:

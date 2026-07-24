@@ -284,55 +284,11 @@ class ImportExportService:
         return manifest_path
 
     def _render_sad_document(self, document: dict[str, Any], target: Path) -> None:
-        frontmatter = document.get("frontmatter") or []
-        preambles = document.get("preamble") or []
-        sections = document.get("sections") or []
-        decisions = document.get("decisions") or []
-        lines: list[str] = []
-        if frontmatter:
-            front = (frontmatter[0].get("metadata") or {}).get("frontmatter")
-            if front:
-                import yaml
-
-                lines += [
-                    "---",
-                    yaml.safe_dump(front, sort_keys=False, allow_unicode=True).rstrip("\n"),
-                    "---",
-                    "",
-                ]
-        if preambles:
-            preamble = (preambles[0].get("metadata") or {}).get("body_md", "").strip("\n")
-            if preamble:
-                lines += [preamble, ""]
-        for sec in sections:
-            md = sec.get("metadata") or {}
-            lines += [f"{'#' * md.get('level', 2)} {sec['title']}", ""]
-            if md.get("role") == "decisions":
-                section_body = (md.get("body_md") or "").strip("\n")
-                first_decision = SAD_DECISION_RE.search(section_body)
-                prefix = section_body[: first_decision.start()].strip("\n") if first_decision else section_body
-                if prefix:
-                    lines += [_sync_decision_summary(prefix, decisions), ""]
-                for d in decisions:
-                    dm = d.get("metadata") or {}
-                    did = dm.get("decision_id", "")
-                    title = d["title"].split(":", 1)[1].strip() if ":" in d["title"] else d["title"]
-                    body = (dm.get("body_md") or "").strip("\n")
-                    status_match = re.match(r"\*\*Status:\*\*\s*([^\n]+)\n?", body)
-                    if status_match:
-                        status_text = status_match.group(1).strip()
-                        body = body[status_match.end() :].lstrip("\n")
-                    else:
-                        status_text = d.get("status") or "proposed"
-                        if isinstance(status_text, str) and status_text.islower():
-                            status_text = status_text.capitalize()
-                    lines += [f"### {did}: {title}", "", f"**Status:** {status_text}", ""]
-                    if body:
-                        lines += [body, ""]
-            else:
-                lines += [(md.get("body_md") or "").strip("\n"), ""]
-        text = "\n".join(lines).rstrip("\n") + "\n"
-        target.write_text(text, encoding="utf-8", newline="\n")
+        target.write_text(
+            render_sad_document_text(document),
+            encoding="utf-8",
+            newline="\n",
+        )
 
     def _seen_local_ids_for_project(self, project_id: str) -> dict[tuple[str, str], str]:
         """Seed the collision tracker from items already in the DB.
@@ -2197,6 +2153,85 @@ def _sync_decision_summary(prefix: str, decisions: list[dict[str, Any]]) -> str:
         insert_at = (last_row_index if last_row_index is not None else separator_index) + 1
         lines[insert_at:insert_at] = missing
     return "\n".join(lines)
+
+
+def render_sad_document_text(document: dict[str, Any]) -> str:
+    """Render the one canonical Markdown body owned by a structured SAD."""
+    frontmatter = document.get("frontmatter") or []
+    preambles = document.get("preamble") or []
+    sections = document.get("sections") or []
+    decisions = document.get("decisions") or []
+    lines: list[str] = []
+    if frontmatter:
+        front = (frontmatter[0].get("metadata") or {}).get("frontmatter")
+        if front:
+            import yaml
+
+            lines += [
+                "---",
+                yaml.safe_dump(
+                    front,
+                    sort_keys=False,
+                    allow_unicode=True,
+                ).rstrip("\n"),
+                "---",
+                "",
+            ]
+    if preambles:
+        preamble = (
+            (preambles[0].get("metadata") or {})
+            .get("body_md", "")
+            .strip("\n")
+        )
+        if preamble:
+            lines += [preamble, ""]
+    for section in sections:
+        metadata = section.get("metadata") or {}
+        lines += [
+            f"{'#' * metadata.get('level', 2)} {section['title']}",
+            "",
+        ]
+        if metadata.get("role") == "decisions":
+            section_body = (metadata.get("body_md") or "").strip("\n")
+            first_decision = SAD_DECISION_RE.search(section_body)
+            prefix = (
+                section_body[: first_decision.start()].strip("\n")
+                if first_decision
+                else section_body
+            )
+            if prefix:
+                lines += [_sync_decision_summary(prefix, decisions), ""]
+            for decision in decisions:
+                decision_metadata = decision.get("metadata") or {}
+                decision_id = decision_metadata.get("decision_id", "")
+                title = (
+                    decision["title"].split(":", 1)[1].strip()
+                    if ":" in decision["title"]
+                    else decision["title"]
+                )
+                body = (decision_metadata.get("body_md") or "").strip("\n")
+                status_match = re.match(
+                    r"\*\*Status:\*\*\s*([^\n]+)\n?",
+                    body,
+                )
+                if status_match:
+                    status_text = status_match.group(1).strip()
+                    body = body[status_match.end() :].lstrip("\n")
+                else:
+                    status_text = decision.get("status") or "proposed"
+                    if isinstance(status_text, str) and status_text.islower():
+                        status_text = status_text.capitalize()
+                lines += [
+                    f"### {decision_id}: {title}",
+                    "",
+                    f"**Status:** {status_text}",
+                    "",
+                ]
+                if body:
+                    lines += [body, ""]
+        else:
+            lines += [(metadata.get("body_md") or "").strip("\n"), ""]
+    return "\n".join(lines).rstrip("\n") + "\n"
 
 
 def parse_sad_sections(text: str) -> list[dict[str, Any]]:
