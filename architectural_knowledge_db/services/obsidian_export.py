@@ -45,11 +45,14 @@ class ObsidianNameRegistry:
     First holder of a base slug keeps the bare name. Later collisions are
     qualified by a stable key (repo, then section_key) — never by insertion order
     alone: the qualifier is derived from the colliding item's repo/section.
+
+    Uniqueness is **case-insensitive** (``str.casefold``): Windows and Obsidian
+    vaults treat ``Foo.md`` and ``foo.md`` as the same path.
     """
 
     def __init__(self) -> None:
         self._uid_to_name: dict[str, str] = {}
-        self._taken: set[str] = set()
+        self._taken: dict[str, str] = {}  # casefold(name) -> canonical display name
         self._base_holders: dict[str, list[dict[str, Any]]] = defaultdict(list)
 
     def register(
@@ -74,19 +77,30 @@ class ObsidianNameRegistry:
         }
         holders = self._base_holders[base]
         holders.append(holder)
-        if len(holders) == 1 and base not in self._taken:
+        if len(holders) == 1 and not self._is_taken(base):
             name = base
         else:
             name = self._qualified_name(holder)
-            # If still taken (same repo/section as another), append sanitized uid.
-            if name in self._taken:
+            # If still taken (same repo/section or casefold collision), append uid.
+            if self._is_taken(name):
                 name = f"{name} · {_safe_base(item_uid)}"
+            # Last resort: numeric suffix if even the uid-qualified form collides.
+            n = 2
+            while self._is_taken(name):
+                name = f"{self._qualified_name(holder)} · {_safe_base(item_uid)} · {n}"
+                n += 1
         self._uid_to_name[item_uid] = name
-        self._taken.add(name)
+        self._mark_taken(name)
         return name
 
     def resolve(self, item_uid: str) -> str | None:
         return self._uid_to_name.get(item_uid)
+
+    def _is_taken(self, name: str) -> bool:
+        return name.casefold() in self._taken
+
+    def _mark_taken(self, name: str) -> None:
+        self._taken[name.casefold()] = name
 
     def _qualified_name(self, holder: dict[str, Any]) -> str:
         repo = _safe_base(holder["repo"] or "unknown")

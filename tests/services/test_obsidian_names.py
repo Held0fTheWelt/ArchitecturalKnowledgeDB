@@ -68,3 +68,24 @@ def test_registry_uid_suffix_is_filesystem_safe():
     forbidden = '<>:"|?*\\/'
     assert ":" not in name
     assert not any(ch in name for ch in forbidden)
+
+
+def test_registry_treats_case_variants_as_collisions():
+    """Windows/Obsidian vaults are case-insensitive; 'Foo' and 'foo' must not share a path."""
+    reg = ObsidianNameRegistry()
+    a = reg.register(
+        item_uid="u1",
+        item_type="sad",
+        title="D1 Product Boundary And Package Contract",
+        repo="Git",
+        section_key=None,
+    )
+    b = reg.register(
+        item_uid="u2",
+        item_type="sad",
+        title="D1 Product boundary and package contract",
+        repo="Git",
+        section_key="D1",
+    )
+    assert a.casefold() != b.casefold()
+    assert a != b
