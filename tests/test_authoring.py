@@ -51,6 +51,31 @@ def test_set_spec_status_gate(conn):
     assert out["changed"] is False and out["validation"]["ok"] is False
 
 
+def test_set_spec_status_preserves_body_metadata(conn):
+    from architectural_knowledge_db.models import SpecInput
+    from architectural_knowledge_db.services.knowledge import KnowledgeService
+    from architectural_knowledge_db.services.authoring import AuthoringService
+    add_project(conn, "p")
+    s = KnowledgeService(conn).upsert_spec(
+        "p",
+        SpecInput(
+            spec_id="S1",
+            title="x",
+            archetype="function",
+            lifecycle="ready",
+            metadata={
+                "body_text": "# S1\n",
+                "repo_source_key": "docs/architecture/specs/S1.md",
+            },
+        ),
+    )
+    out = AuthoringService(conn).set_spec_status("p", s["item_uid"], "implemented")
+    assert out["changed"] is True
+    meta = out["spec"]["metadata"]
+    assert meta["body_text"] == "# S1\n"
+    assert meta["repo_source_key"] == "docs/architecture/specs/S1.md"
+
+
 def test_scaffold_spec_lists_required_diagrams(conn):
     from architectural_knowledge_db.services.authoring import AuthoringService
     add_project(conn, "p")

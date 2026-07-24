@@ -118,7 +118,10 @@ class AuthoringService:
         updated = self.knowledge.upsert_spec(project_id, SpecInput(
             spec_id=spec["details"]["spec_id"], title=spec["title"], archetype=spec["details"]["archetype"],
             lifecycle=status, mvp_uid=spec["details"].get("mvp_uid"),
-            sections=spec["details"].get("sections", [])))
+            sections=spec["details"].get("sections", []),
+            summary=spec.get("summary"),
+            metadata=spec.get("metadata") or {},
+        ))
         return {"changed": True, "spec": updated}
 
     def scaffold_spec(self, project_id, archetype, topic_uid=None) -> dict[str, Any]:
