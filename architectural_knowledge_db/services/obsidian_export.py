@@ -537,7 +537,145 @@ def build_workspace_index(
         ),
     ).encode("utf-8")
     files["_index/MOC — Systeme.md"] = _render_systeme_moc(systems).encode("utf-8")
+    files["_index/MOC — In Arbeit.md"] = _render_in_arbeit_moc(
+        conn, project_ids, registry=registry
+    ).encode("utf-8")
     return dict(sorted(files.items()))
+
+
+def _render_in_arbeit_moc(
+    conn: Any,
+    project_ids: list[str],
+    *,
+    registry: ObsidianNameRegistry,
+) -> str:
+    """D8: open change-items + ready specs + pending summary; degrades gracefully."""
+    lines = [
+        "# MOC — In Arbeit",
+        "",
+        "Open change-set work across the workshop (Soll over Ist).",
+        "",
+    ]
+    open_sections: list[str] = []
+    ready_specs: list[str] = []
+    pending_summaries: list[str] = []
+
+    change_svc = None
+    try:
+        from architectural_knowledge_db.services.change_sets import ChangeSetService
+
+        change_svc = ChangeSetService(conn)
+    except Exception:  # noqa: BLE001 - D11: change-set layer optional
+        change_svc = None
+
+    for project_id in project_ids:
+        if change_svc is not None:
+            try:
+                work_orders = change_svc.open_work_orders(project_id)
+            except Exception:  # noqa: BLE001
+                work_orders = []
+            for order in work_orders:
+                open_count = int(order.get("open") or 0)
+                if open_count <= 0:
+                    continue
+                spec_name = registry.resolve(str(order.get("spec_uid") or "")) or str(
+                    order.get("spec_id") or order.get("title") or "spec"
+                )
+                section = [
+                    f"### {order.get('spec_id') or spec_name} (`{project_id}`)",
+                    "",
+                    f"- Spec: [[{spec_name}]] — open={open_count}, "
+                    f"in_progress={order.get('in_progress', 0)}, done={order.get('done', 0)}",
+                ]
+                for item in order.get("items") or []:
+                    if item.get("state") == "done":
+                        continue
+                    target_ref = str(item.get("target_ref") or "")
+                    # Prefer a registry hit when target_ref matches a note name / local id.
+                    link = None
+                    for uid, name in getattr(registry, "_uid_to_name", {}).items():
+                        if target_ref and (
+                            target_ref == name
+                            or target_ref in name
+                            or name.endswith(target_ref)
+                            or target_ref in uid
+                        ):
+                            link = name
+                            break
+                    if link:
+                        section.append(
+                            f"- {item.get('op')} {item.get('target_kind')} → [[{link}]] "
+                            f"({item.get('state')})"
+                        )
+                    else:
+                        section.append(
+                            f"- {item.get('op')} {item.get('target_kind')} `{target_ref}` "
+                            f"({item.get('state')})"
+                        )
+                section.append("")
+                open_sections.append("\n".join(section))
+
+            try:
+                pending = change_svc.render_pending(project_id, "")
+            except Exception:  # noqa: BLE001
+                pending = {}
+            if pending:
+                pending_summaries.append(
+                    f"- `{project_id}`: {len(pending)} pending projection file(s)"
+                )
+
+        for item in _list_renderable_items(conn, project_id):
+            if item.get("item_type") != "spec":
+                continue
+            if _spec_lifecycle_bucket(item) != "ready":
+                continue
+            name = registry.resolve(item["item_uid"])
+            if name:
+                ready_specs.append(name)
+
+    has_flight = bool(open_sections or ready_specs or pending_summaries)
+    if not has_flight:
+        lines.extend(
+            [
+                "## Nothing in flight",
+                "",
+                "No open change_items, no specs in `ready`, and no `_pending/` delta.",
+                "",
+            ]
+        )
+    else:
+        lines.extend(["## Open change items", ""])
+        if open_sections:
+            lines.extend(open_sections)
+        else:
+            lines.extend(["_No open change_items._", ""])
+        lines.extend(["## Specs in `ready`", ""])
+        if ready_specs:
+            for name in sorted(set(ready_specs)):
+                lines.append(f"- [[{name}]]")
+            lines.append("")
+        else:
+            lines.extend(["_None._", ""])
+        lines.extend(["## `_pending/` summary", ""])
+        if pending_summaries:
+            lines.extend(pending_summaries)
+            lines.append("")
+        else:
+            lines.extend(["_None._", ""])
+
+    lines.extend(
+        [
+            "## Dataview",
+            "",
+            "```dataview",
+            "TABLE status, repo, system",
+            'WHERE kind = "spec" AND status = "ready"',
+            "SORT file.name ASC",
+            "```",
+            "",
+        ]
+    )
+    return "\n".join(lines)
 
 
 def _render_start_here(
@@ -562,6 +700,7 @@ def _render_start_here(
             "- [[MOC — Entscheidungen]] — ADRs by status",
             "- [[MOC — Specs]] — specs by lifecycle",
             "- [[MOC — Systeme]] — one row per system/namespace",
+            "- [[MOC — In Arbeit]] — open change-set work (degrades when empty)",
             "",
             "Static lists work with zero plugins; Dataview blocks below each list are interactive when the plugin is enabled.",
             "",
