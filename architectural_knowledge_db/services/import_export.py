@@ -669,7 +669,42 @@ class ImportExportService:
             mirror_path.parent.mkdir(parents=True, exist_ok=True)
             _write_text_exact_with_encoding(mirror_path, body_text, encoding)
             written.append(str(mirror_path))
+        pending = self._sync_pending_view(project_id, dest_root)
+        written.extend(pending["written"])
+        deleted.extend(pending["deleted"])
         return {"written": written, "deleted": deleted, "skipped": skipped}
+
+    def _sync_pending_view(self, project_id: str, dest_root: Path) -> dict[str, list[str]]:
+        """Write/prune the synthetic `_pending/` mirror (D7) — re-rendered every call.
+
+        Unlike the knowledge-item mirror, `change_items` carry no
+        `repo_source_key`/dirty-queue entry, so this is a full (cheap)
+        recompute rather than a dirty-queue drain; `verify_export` is still
+        the correctness backstop if this hasn't run since a spec closed.
+        """
+        from architectural_knowledge_db.services.change_sets import ChangeSetService
+
+        expected = ChangeSetService(self.conn).render_pending(project_id, "")
+        written: list[str] = []
+        deleted: list[str] = []
+        for rel, text in expected.items():
+            target_path = dest_root / Path(*PurePosixPath(rel).parts)
+            encoded = text.encode("utf-8")
+            if not target_path.is_file() or target_path.read_bytes() != encoded:
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                target_path.write_bytes(encoded)
+                written.append(str(target_path))
+        pending_dir = dest_root / "_pending"
+        if pending_dir.is_dir():
+            for existing in list(pending_dir.rglob("*")):
+                if not existing.is_file():
+                    continue
+                rel = existing.relative_to(dest_root).as_posix()
+                if rel not in expected:
+                    existing.unlink()
+                    deleted.append(str(existing))
+            _prune_empty_dirs(pending_dir, dest_root)
+        return {"written": written, "deleted": deleted}
 
     def _expected_mirror_files(self, project_id: str, dest_root: Path) -> dict[str, tuple[str, str]]:
         """{mirror-relative path: (body_text, body_encoding)} for every item mappable into dest_root.
@@ -728,8 +763,25 @@ class ImportExportService:
                 matched += 1
             else:
                 mismatched.append(rel)
-        missing = sorted(set(expected) - set(actual))
-        extra = sorted(set(actual) - set(expected))
+
+        # `_pending/*` (D7) is a synthetic projection re-rendered fresh here,
+        # NOT a body_text round-trip -- keep it out of `expected`/_expected_mirror_files
+        # (the byte-exact canon set) and compare separately.
+        from architectural_knowledge_db.services.change_sets import ChangeSetService
+
+        pending_expected = ChangeSetService(self.conn).render_pending(project_id, "")
+        for rel, text in sorted(pending_expected.items()):
+            actual_path = actual.get(rel)
+            if actual_path is None:
+                continue
+            if actual_path.read_bytes() == text.encode("utf-8"):
+                matched += 1
+            else:
+                mismatched.append(rel)
+
+        expected_keys = set(expected) | set(pending_expected)
+        missing = sorted(expected_keys - set(actual))
+        extra = sorted(set(actual) - expected_keys)
         return {
             "project_id": project_id,
             "target_id": target_id,
@@ -762,9 +814,13 @@ class ImportExportService:
             if not existing.is_file() or existing.name in _MIRROR_RESERVED_NAMES:
                 continue
             rel = existing.relative_to(dest_root).as_posix()
-            if rel not in expected:
-                existing.unlink()
-                pruned.append(str(existing))
+            if rel in expected or rel.startswith("_pending/"):
+                continue
+            existing.unlink()
+            pruned.append(str(existing))
+        pending = self._sync_pending_view(project_id, dest_root)
+        written.extend(pending["written"])
+        pruned.extend(pending["deleted"])
         for existing in sorted(dest_root.rglob("*"), reverse=True):
             if existing.is_dir() and not any(existing.iterdir()):
                 existing.rmdir()

@@ -87,6 +87,28 @@ def _rows(rows) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+PENDING_GENERATED_BANNER = "> GENERATED — do not edit"
+
+
+def _render_pending_markdown(entry: dict[str, Any]) -> str:
+    lines = [
+        PENDING_GENERATED_BANNER,
+        "",
+        f"# Pending changes — {entry['spec_id']}: {entry['title']}",
+        "",
+        f"spec lifecycle: {entry['lifecycle']}",
+        "",
+    ]
+    for item in entry["items"]:
+        if item["state"] == "done":
+            continue
+        note = f" — {item['note']}" if item.get("note") else ""
+        lines.append(
+            f"- {item['op']} {item['target_kind']}:{item['target_ref']} [{item['state']}]{note}"
+        )
+    return "\n".join(lines).rstrip("\n") + "\n"
+
+
 class ChangeSetService:
     def __init__(self, conn):
         self.conn = conn
@@ -390,6 +412,23 @@ class ChangeSetService:
                 sections=adr_item.get("sections", []),
             ),
         )
+
+    # -- render_pending (synthetic `_pending/` mirror view, D7) ------------
+
+    def render_pending(self, project_id: str, target_dest_root: str) -> dict[str, str]:
+        """One `<dest_root>/_pending/<spec_id>.md` per spec with open change_items.
+
+        A synthetic projection over `open_work_orders` — NOT a body_text
+        round-trip. Callers pass "" for target_dest_root to get keys relative
+        to a mirror root (for auto-export wiring); passing an actual root
+        string prefixes it onto every key (per the spec's D7 contract).
+        """
+        root = str(target_dest_root).replace("\\", "/").rstrip("/")
+        prefix = f"{root}/" if root else ""
+        return {
+            f"{prefix}_pending/{entry['spec_id']}.md": _render_pending_markdown(entry)
+            for entry in self.open_work_orders(project_id)
+        }
 
     def _reupsert_sad_decision(
         self, project_id: str, document_id: str, decision_id: str, decision_item: dict[str, Any], status: str
