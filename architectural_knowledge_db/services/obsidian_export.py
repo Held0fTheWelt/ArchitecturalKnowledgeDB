@@ -406,19 +406,7 @@ def render_system_moc(
     return f"{note_name}.md", text.encode("utf-8")
 
 
-def expected_vault_files(
-    conn: Any,
-    project_id: str,
-    namespace: str,
-    *,
-    workspace: Any | None = None,
-) -> dict[str, bytes]:
-    """Deterministic ``{namespace/<Note>.md → bytes}`` map for one project (D1/D4/D5/D6/D7).
-
-    Two passes: (1) register all names, (2) render bodies so links resolve forward refs.
-    ``workspace`` is reserved for Plan C cross-repo resolution; v1 is intra-project only.
-    """
-    del workspace
+def _list_renderable_items(conn: Any, project_id: str) -> list[dict[str, Any]]:
     from architectural_knowledge_db.services.knowledge import KnowledgeService
 
     items = KnowledgeService(conn).list_items(project_id, include_shared=False, limit=100000)
@@ -428,25 +416,94 @@ def expected_vault_files(
         if item.get("item_type") in _RENDERABLE_TYPES and (item.get("title") or item.get("local_id"))
     ]
     renderable.sort(key=_stable_item_key)
+    return renderable
 
+
+def _index_item_paths(path_index: dict[str, str], item: dict[str, Any], name: str) -> None:
+    source_key = _item_source_key(item)
+    if not source_key:
+        return
+    normalized = str(source_key).replace("\\", "/")
+    repo = _item_repo(item)
+    path_index[normalized] = name
+    path_index[normalized.split("/")[-1]] = name
+    path_index[f"{repo}/{normalized}"] = name
+    path_index[f"{repo}/{normalized.split('/')[-1]}"] = name
+
+
+def build_global_registry(conn: Any, project_ids: list[str]) -> ObsidianNameRegistry:
+    """Register every renderable item across projects into one name space (D4).
+
+    Collisions qualify by repo first (same as :class:`ObsidianNameRegistry`).
+    Also attaches ``path_index`` and ``uid_body`` for cross-repo link resolution.
+    """
     registry = ObsidianNameRegistry()
     path_index: dict[str, str] = {}
     uid_body: dict[str, str] = {}
+    for project_id in project_ids:
+        for item in _list_renderable_items(conn, project_id):
+            name = registry.register(
+                item_uid=item["item_uid"],
+                item_type=str(item.get("item_type") or ""),
+                title=str(item.get("title") or item.get("local_id") or item["item_uid"]),
+                repo=_item_repo(item),
+                section_key=_item_section_key(item),
+            )
+            _index_item_paths(path_index, item, name)
+            uid_body[item["item_uid"]] = (item.get("metadata") or {}).get("body_text") or ""
+    registry.path_index = path_index  # type: ignore[attr-defined]
+    registry.uid_body = uid_body  # type: ignore[attr-defined]
+    return registry
 
-    for item in renderable:
-        name = registry.register(
-            item_uid=item["item_uid"],
-            item_type=str(item.get("item_type") or ""),
-            title=str(item.get("title") or item.get("local_id") or item["item_uid"]),
-            repo=_item_repo(item),
-            section_key=_item_section_key(item),
-        )
-        source_key = _item_source_key(item)
-        if source_key:
-            normalized = str(source_key).replace("\\", "/")
-            path_index[normalized] = name
-            path_index[normalized.split("/")[-1]] = name
-        uid_body[item["item_uid"]] = (item.get("metadata") or {}).get("body_text") or ""
+
+def expected_vault_files(
+    conn: Any,
+    project_id: str,
+    namespace: str,
+    *,
+    workspace: Any | None = None,
+    global_registry: ObsidianNameRegistry | None = None,
+) -> dict[str, bytes]:
+    """Deterministic ``{namespace/<Note>.md → bytes}`` map for one project (D1/D4/D5/D6/D7).
+
+    Two passes: (1) register all names, (2) render bodies so links resolve forward refs.
+    When ``global_registry`` is supplied, names and path lookups span the whole workshop;
+    ``workspace.resolve_reference`` is the fallback for cross-repo hrefs (D3).
+    """
+    renderable = _list_renderable_items(conn, project_id)
+
+    if global_registry is not None:
+        registry = global_registry
+        path_index: dict[str, str] = dict(getattr(global_registry, "path_index", {}) or {})
+        uid_body: dict[str, str] = dict(getattr(global_registry, "uid_body", {}) or {})
+        for item in renderable:
+            if registry.resolve(item["item_uid"]) is None:
+                name = registry.register(
+                    item_uid=item["item_uid"],
+                    item_type=str(item.get("item_type") or ""),
+                    title=str(item.get("title") or item.get("local_id") or item["item_uid"]),
+                    repo=_item_repo(item),
+                    section_key=_item_section_key(item),
+                )
+                _index_item_paths(path_index, item, name)
+            else:
+                name = registry.resolve(item["item_uid"]) or ""
+                _index_item_paths(path_index, item, name)
+            uid_body[item["item_uid"]] = (item.get("metadata") or {}).get("body_text") or ""
+    else:
+        registry = ObsidianNameRegistry()
+        path_index = {}
+        uid_body = {}
+        for item in renderable:
+            name = registry.register(
+                item_uid=item["item_uid"],
+                item_type=str(item.get("item_type") or ""),
+                title=str(item.get("title") or item.get("local_id") or item["item_uid"]),
+                repo=_item_repo(item),
+                section_key=_item_section_key(item),
+            )
+            _index_item_paths(path_index, item, name)
+            uid_body[item["item_uid"]] = (item.get("metadata") or {}).get("body_text") or ""
 
     def resolve_target(href: str, *, current_uid: str | None = None) -> str | None:
         href = href.strip()
@@ -463,6 +520,19 @@ def expected_vault_files(
         else:
             key = path.replace("\\", "/")
             note = path_index.get(key) or path_index.get(key.split("/")[-1])
+            if note is None and workspace is not None and "/" in key:
+                try:
+                    resolved = workspace.resolve_reference(project_id, key)
+                except Exception:  # noqa: BLE001 - degrade to unresolved text (A3)
+                    resolved = {"resolved": False}
+                if resolved.get("resolved"):
+                    repo = str(resolved.get("repository_id") or "")
+                    rpath = str(resolved.get("path") or "").replace("\\", "/")
+                    note = (
+                        path_index.get(f"{repo}/{rpath}")
+                        or path_index.get(rpath)
+                        or path_index.get(rpath.split("/")[-1])
+                    )
         if note is None:
             return None
         if not frag:
