@@ -737,7 +737,11 @@ class ImportExportService:
                 derived: list[dict[str, Any]] = []
             else:
                 self._delete_outgoing_links(owner["item_uid"])
-                self._delete_imported_sad_children(owner["item_uid"])
+                self._delete_imported_sad_children(
+                    project_id,
+                    owner["item_uid"],
+                    repo_key,
+                )
                 updated_metadata = {
                     **metadata,
                     **document.get("metadata", {}),
@@ -859,22 +863,42 @@ class ImportExportService:
             (item_uid,),
         )
 
-    def _delete_imported_sad_children(self, parent_item_uid: str) -> None:
+    def _delete_imported_sad_children(
+        self,
+        project_id: str,
+        parent_item_uid: str,
+        repo_source_key: str,
+    ) -> None:
         children = self.conn.execute(
             """
-            SELECT item_uid
-            FROM knowledge_items
-            WHERE item_type IN (
+            SELECT child.item_uid
+            FROM knowledge_items AS child
+            LEFT JOIN knowledge_items AS parent
+              ON parent.item_uid = json_extract(
+                child.metadata_json,
+                '$.parent_item_uid'
+              )
+            WHERE child.project_id = ?
+              AND child.item_type IN (
                 'sad_frontmatter', 'sad_preamble', 'sad_section', 'sad_decision'
-            )
-              AND json_extract(metadata_json, '$.parent_item_uid') = ?
+              )
+              AND (
+                json_extract(child.metadata_json, '$.parent_item_uid') = ?
+                OR (
+                  json_extract(child.metadata_json, '$.repo_source_key') = ?
+                  AND parent.item_uid IS NULL
+                )
+              )
             """,
-            (parent_item_uid,),
+            (project_id, parent_item_uid, repo_source_key),
         ).fetchall()
         for child in children:
             self.conn.execute(
-                "DELETE FROM knowledge_links WHERE source_item_uid = ?",
-                (child["item_uid"],),
+                """
+                DELETE FROM knowledge_links
+                WHERE source_item_uid = ? OR target_ref = ?
+                """,
+                (child["item_uid"], child["item_uid"]),
             )
             self.conn.execute(
                 "DELETE FROM fts_knowledge WHERE item_uid = ?",

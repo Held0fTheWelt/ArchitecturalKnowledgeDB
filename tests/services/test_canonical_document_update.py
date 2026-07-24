@@ -9,6 +9,7 @@ import pytest
 from architectural_knowledge_db.models import (
     CanonicalDocumentCreate,
     CanonicalDocumentUpdate,
+    KnowledgeLinkInput,
     ProjectUpsert,
     RepositoryRegistration,
 )
@@ -130,6 +131,85 @@ def test_update_canonical_sad_replaces_body_links_and_derived_children(
         row["item_ref"] == "docs/architecture/project/demo/architecture.md"
         for row in dirty
     )
+
+
+def test_update_canonical_sad_prunes_legacy_orphan_children_for_same_source(
+    conn, tmp_path: Path
+) -> None:
+    root = _setup_repository(conn, tmp_path)
+    sad_path = (
+        root
+        / "docs"
+        / "architecture"
+        / "project"
+        / "demo"
+        / "architecture.md"
+    )
+    sad_path.parent.mkdir(parents=True)
+    sad_path.write_text(
+        "# Demo\n\n## 9. Architecture Decisions\n\n"
+        "### D1: Current\n\n**Status:** Accepted\n\nCurrent.\n",
+        encoding="utf-8",
+        newline="",
+    )
+    service = ImportExportService(conn)
+    service.import_documents(
+        "p",
+        root / "docs" / "architecture",
+        include=["**/*"],
+    )
+    knowledge = KnowledgeService(conn)
+    orphan_uid = knowledge._upsert_item(
+        project_id="p",
+        space_id=None,
+        item_type="sad_decision",
+        local_id="legacy-demo:decision:d0",
+        title="D0: Legacy",
+        status="accepted",
+        authority_level="active_rule",
+        summary="Legacy",
+        source_uri="legacy",
+        metadata={
+            "repo_source_key": "docs/architecture/project/demo/architecture.md",
+            "parent_item_uid": "p:sad:legacy-demo",
+            "decision_id": "D0",
+            "body_md": "Legacy.",
+        },
+    )
+    knowledge._index_item(orphan_uid)
+    knowledge.upsert_link(
+        "p",
+        KnowledgeLinkInput(
+            source_item_uid=orphan_uid,
+            target_ref="p:sad:legacy-demo",
+            link_type="part_of",
+        ),
+    )
+
+    service.update_canonical_document(
+        "p",
+        CanonicalDocumentUpdate(
+            repository_id="Git",
+            repo_source_key="docs/architecture/project/demo/architecture.md",
+            body_text=(
+                "# Demo\n\n## 9. Architecture Decisions\n\n"
+                "### D2: Reconciled\n\n**Status:** Accepted\n\nCurrent.\n"
+            ),
+            body_origin="canonical",
+        ),
+    )
+
+    assert conn.execute(
+        "SELECT 1 FROM knowledge_items WHERE item_uid = ?",
+        (orphan_uid,),
+    ).fetchone() is None
+    assert conn.execute(
+        """
+        SELECT 1 FROM knowledge_links
+        WHERE source_item_uid = ? OR target_ref = ?
+        """,
+        (orphan_uid, orphan_uid),
+    ).fetchone() is None
 
 
 def test_create_canonical_sad_without_source_side_authoring_file(

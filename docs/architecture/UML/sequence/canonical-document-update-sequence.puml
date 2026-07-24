@@ -43,7 +43,7 @@ else update
    Canon -> SadParser : derive D*, B-Dn and C-Tn decisions\nand retain summary-table status
    SadParser --> Canon : ordered structured SAD children
   end
-  Canon -> DB : replace stale links and SAD children
+  Canon -> DB : replace current SAD children\nand prune same-source orphan children
   opt ADR owner
    Canon -> Knowledge : replace structured ADR
   end
