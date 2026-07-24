@@ -1172,6 +1172,8 @@ class ImportExportService:
         target = targets.get_target(project_id, target_id)
         if target is None:
             raise ValueError(f"Unknown export target {target_id} in project {project_id}")
+        if target.get("layout") == "obsidian-vault":
+            return self._obsidian_incremental(project_id, target)
         dest_root = targets.resolve_dest_root(project_id, target_id)
         mirror_root_key = _target_mirror_root_key(target)
         rows = targets.drain_dirty(project_id, target_id)
@@ -1307,6 +1309,8 @@ class ImportExportService:
         target = ExportTargetsService(self.conn).get_target(project_id, target_id)
         if target is None:
             raise ValueError(f"Unknown export target {target_id} in project {project_id}")
+        if target.get("layout") == "obsidian-vault":
+            return self._obsidian_verify(project_id, target)
         dest_root = ExportTargetsService(self.conn).resolve_dest_root(project_id, target_id)
         expected = self._expected_mirror_files(
             project_id,
@@ -1370,6 +1374,8 @@ class ImportExportService:
         target = targets.get_target(project_id, target_id)
         if target is None:
             raise ValueError(f"Unknown export target {target_id} in project {project_id}")
+        if target.get("layout") == "obsidian-vault":
+            return self._obsidian_sync(project_id, target)
         dest_root = targets.resolve_dest_root(project_id, target_id)
         dest_root.mkdir(parents=True, exist_ok=True)
         expected = self._expected_mirror_files(
@@ -1400,6 +1406,102 @@ class ImportExportService:
                 existing.rmdir()
         targets.drain_dirty(project_id, target_id)
         return {"written": written, "pruned": pruned}
+
+    def _obsidian_expected_under_dest(
+        self, project_id: str, target: dict[str, Any]
+    ) -> tuple[Path, dict[str, bytes]]:
+        """Resolve dest_root and the renderer map, keyed relative to dest_root.
+
+        ``expected_vault_files`` emits ``{namespace}/Note.md`` keys. Dest roots for
+        obsidian-vault targets are the namespace folder itself (D3), so strip the
+        namespace prefix for on-disk relative paths.
+        """
+        from architectural_knowledge_db.services.export_targets import ExportTargetsService
+        from architectural_knowledge_db.services.obsidian_export import expected_vault_files
+
+        dest_root = ExportTargetsService(self.conn).resolve_dest_root(
+            project_id, target["target_id"]
+        )
+        namespace = Path(dest_root).name
+        namespaced = expected_vault_files(self.conn, project_id, namespace)
+        prefix = f"{namespace}/"
+        expected: dict[str, bytes] = {}
+        for rel, payload in namespaced.items():
+            if rel.startswith(prefix):
+                expected[rel[len(prefix) :]] = payload
+            else:
+                expected[rel] = payload
+        return dest_root, expected
+
+    def _obsidian_verify(self, project_id: str, target: dict[str, Any]) -> dict[str, Any]:
+        dest_root, expected = self._obsidian_expected_under_dest(project_id, target)
+        actual = (
+            {
+                p.relative_to(dest_root).as_posix(): p
+                for p in dest_root.rglob("*")
+                if p.is_file() and p.name not in _MIRROR_RESERVED_NAMES
+            }
+            if dest_root.is_dir()
+            else {}
+        )
+        matched = 0
+        mismatched: list[str] = []
+        for rel, payload in sorted(expected.items()):
+            actual_path = actual.get(rel)
+            if actual_path is None:
+                continue
+            if actual_path.read_bytes() == payload:
+                matched += 1
+            else:
+                mismatched.append(rel)
+        missing = sorted(set(expected) - set(actual))
+        extra = sorted(set(actual) - set(expected))
+        return {
+            "project_id": project_id,
+            "target_id": target["target_id"],
+            "dest_root": str(dest_root),
+            "matched": matched,
+            "mismatched": mismatched,
+            "missing": missing,
+            "extra": extra,
+        }
+
+    def _obsidian_sync(self, project_id: str, target: dict[str, Any]) -> dict[str, Any]:
+        from architectural_knowledge_db.services.export_targets import ExportTargetsService
+
+        dest_root, expected = self._obsidian_expected_under_dest(project_id, target)
+        dest_root.mkdir(parents=True, exist_ok=True)
+        written: list[str] = []
+        for rel, payload in expected.items():
+            target_path = dest_root / Path(*PurePosixPath(rel).parts)
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            if not target_path.is_file() or target_path.read_bytes() != payload:
+                target_path.write_bytes(payload)
+            written.append(str(target_path))
+        pruned: list[str] = []
+        for existing in list(dest_root.rglob("*")):
+            if not existing.is_file() or existing.name in _MIRROR_RESERVED_NAMES:
+                continue
+            rel = existing.relative_to(dest_root).as_posix()
+            if rel in expected:
+                continue
+            existing.unlink()
+            pruned.append(str(existing))
+            _prune_empty_dirs(existing.parent, dest_root)
+        for existing in sorted(dest_root.rglob("*"), reverse=True):
+            if existing.is_dir() and not any(existing.iterdir()):
+                existing.rmdir()
+        ExportTargetsService(self.conn).drain_dirty(project_id, target["target_id"])
+        return {"written": written, "pruned": pruned}
+
+    def _obsidian_incremental(self, project_id: str, target: dict[str, Any]) -> dict[str, Any]:
+        """v1: full namespace re-render (deterministic; no per-item body round-trip)."""
+        result = self._obsidian_sync(project_id, target)
+        return {
+            "written": result.get("written", []),
+            "deleted": result.get("pruned", []),
+            "skipped": [],
+        }
 
     def _find_by_repo_source_key(self, project_id: str, repo_source_key: str) -> tuple[str, str] | None:
         rows = self.conn.execute(
