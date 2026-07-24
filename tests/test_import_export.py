@@ -190,6 +190,37 @@ Must not join the decision body.
     assert "Must not join" not in decisions[0]["body_md"]
 
 
+def test_parse_sad_decisions_accepts_scoped_numbered_ids() -> None:
+    decisions = parse_sad_decisions(
+        """## 9. Architecture Decisions
+
+| ID | Title | Status |
+| --- | --- | --- |
+| B-D1 | Bridge owns the object lifecycle | Implemented |
+| C-T7 | External providers stay optional | Verified / EvidenceRecorded |
+
+### B-D1: Bridge owns the object lifecycle
+
+The bridge owns Unreal objects.
+
+### C-T7: External providers stay optional
+
+Optional providers do not become core dependencies.
+
+## 10. Quality Requirements
+
+Must not join the decision body.
+"""
+    )
+
+    assert [decision["decision_id"] for decision in decisions] == ["B-D1", "C-T7"]
+    assert [decision["status"] for decision in decisions] == [
+        "Implemented",
+        "Verified / EvidenceRecorded",
+    ]
+    assert all("Must not join" not in decision["body_md"] for decision in decisions)
+
+
 def test_document_import_preserves_multi_document_yaml(conn, tmp_path: Path) -> None:
     add_project(conn, "akdb")
     docs = tmp_path / "docs"

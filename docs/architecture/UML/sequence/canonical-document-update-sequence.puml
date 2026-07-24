@@ -10,8 +10,7 @@ participant KnowledgeService as Knowledge
 participant ExportTargetsService as Targets
 database "Database facade" as DB
 participant "Generated target mirror" as Mirror
-Maintainer -> Surface : create/update(project, repository, repo_source_key,
-body, body_origin=canonical)
+Maintainer -> Surface : create/update(project, repository, repo_source_key,\nbody, body_origin=canonical)
 Surface -> Canon : CanonicalDocumentCreate or CanonicalDocumentUpdate
 Canon -> Repositories : require registered repository
 Repositories --> Canon : existing local root
@@ -22,6 +21,10 @@ alt create
   Canon --> Maintainer : fail closed
  else unused identity
   Canon -> Canon : parse and classify complete body
+  opt SAD document
+   Canon -> SadParser : derive D*, B-Dn and C-Tn decisions\nand retain summary-table status
+   SadParser --> Canon : ordered structured SAD children
+  end
   Canon -> Knowledge : create body owner, links, SAD children
   opt ADR path
    Canon -> Knowledge : create structured ADR
@@ -36,6 +39,10 @@ else update
  else exactly one owner
   Canon -> Canon : reject exact generated projection feedback
   Canon -> Canon : parse body and verify classification
+  opt SAD document
+   Canon -> SadParser : derive D*, B-Dn and C-Tn decisions\nand retain summary-table status
+   SadParser --> Canon : ordered structured SAD children
+  end
   Canon -> DB : replace stale links and SAD children
   opt ADR owner
    Canon -> Knowledge : replace structured ADR

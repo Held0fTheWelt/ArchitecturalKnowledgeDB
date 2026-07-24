@@ -1,10 +1,8 @@
 @startuml akdb-traceability
 title ArchitecturalKnowledgeDB - Architecture Traceability
 left to right direction
-rectangle "SAD root
-architecture.md" as Root
-rectangle "Agent-authoring SAD
-subsystems/agent-authoring" as Child
+rectangle "SAD root\narchitecture.md" as Root
+rectangle "Agent-authoring SAD\nsubsystems/agent-authoring" as Child
 rectangle "DB facade + schemas" as DB
 rectangle "CLI / API / MCP" as Surfaces
 rectangle "SAD/UML services" as Authoring

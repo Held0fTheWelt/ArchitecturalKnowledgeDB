@@ -1,19 +1,16 @@
 @startuml akdb-document-lifecycle
 title AKDB - DB-Native Architecture Document Lifecycle
 state "Draft request" as Draft
-state "Canonical current
-(projection may be dirty)" as Canonical
+state "Canonical current\n(projection may be dirty)" as Canonical
 state "Projection current" as Exported
 state "Verified" as Verified
 state "Superseded" as Superseded
 state "Deleted" as Deleted
 [*] --> Draft : canonical create request
 Draft --> Canonical : authoritative commit
-Draft --> [*] : validation failure or rollback
-(no mirror write)
+Draft --> [*] : validation failure or rollback\n(no mirror write)
 Canonical --> Exported : post-commit export succeeds
-Canonical --> Canonical : export fails
-dirty repair work retained
+Canonical --> Canonical : export fails\ndirty repair work retained
 Exported --> Canonical : next DB-native update commits
 Exported --> Verified : repeat export + tests + drift checks
 Verified --> Canonical : architecture/code change commits

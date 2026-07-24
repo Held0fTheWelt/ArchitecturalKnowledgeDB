@@ -40,8 +40,13 @@ MIRROR_MARKDOWN_LINK_RE = re.compile(
 )
 MARKDOWN_FENCE_RE = re.compile(r"^\s*(?P<fence>`{3,}|~{3,})")
 SAD_DECISION_RE = re.compile(
-    r"^###\s+(?P<decision_id>D(?:\d+|-\w+))\s*[:.-]\s*(?P<title>.+?)\s*$",
+    r"^###\s+(?P<decision_id>D(?:\d+|-\w+)|[A-Z][A-Z0-9]*-[A-Z][A-Z0-9]*\d+)"
+    r"\s*[:.-]\s*(?P<title>.+?)\s*$",
     re.IGNORECASE | re.MULTILINE,
+)
+SAD_DECISION_ID_RE = re.compile(
+    r"^(?:D(?:\d+|-\w+)|[A-Z][A-Z0-9]*-[A-Z][A-Z0-9]*\d+)$",
+    re.IGNORECASE,
 )
 SAD_MAIN_SECTION_RE = re.compile(r"^##(?!#)[ \t]+[^\r\n]+$", re.MULTILINE)
 DEFAULT_DOCUMENT_PATTERNS = ["*.md", "*.markdown", "*.yml", "*.yaml", "*.json", "*.csv"]
@@ -2073,6 +2078,12 @@ def parse_frontmatter(text: str) -> dict[str, Any]:
 
 def parse_sad_decisions(text: str) -> list[dict[str, Any]]:
     text = text.replace("\r\n", "\n").replace("\r", "\n")
+    table_statuses: dict[str, str] = {}
+    for line in text.splitlines():
+        cells = [cell.strip() for cell in line.split("|")[1:-1]]
+        if len(cells) < 3 or SAD_DECISION_ID_RE.fullmatch(cells[0]) is None:
+            continue
+        table_statuses[cells[0].lower()] = cells[2]
     decisions = []
     matches = list(SAD_DECISION_RE.finditer(text))
     for index, match in enumerate(matches):
@@ -2088,7 +2099,11 @@ def parse_sad_decisions(text: str) -> list[dict[str, Any]]:
                 "decision_id": match.group("decision_id"),
                 "order": index,
                 "title": match.group("title").strip(),
-                "status": (status_match.group(1).strip().lower() if status_match else "accepted"),
+                "status": (
+                    status_match.group(1).strip().lower()
+                    if status_match
+                    else table_statuses.get(match.group("decision_id").lower(), "accepted")
+                ),
                 "summary": first_sentence(body) or match.group("title").strip(),
                 "body_md": body,
             }

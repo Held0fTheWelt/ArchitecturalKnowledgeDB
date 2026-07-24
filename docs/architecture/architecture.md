@@ -128,7 +128,7 @@ Imported document bodies retain links relative to their canonical `repo_source_k
 
 ### 6.9 DB-native creation and update of canonical documents
 
-A client submits a registered repository id, safe `repo_source_key`, complete body, supported encoding, and explicit `body_origin=canonical` through CLI, API, or MCP. Create requires no existing owner, creates one AKDB-provenance body owner, builds links and derived SAD records, and creates the matching structured ADR or UML record. Update requires exactly one owner, preserves its stable identity, replaces stale links and SAD children, and synchronizes structured ADR/UML state. Unsafe paths, collisions, missing or ambiguous owners, reclassification, structurally unmatched UML, and exact generated-projection feedback fail closed. See [canonical document authoring sequence](UML/sequence/canonical-document-update-sequence.puml).
+A client submits a registered repository id, safe `repo_source_key`, complete body, supported encoding, and explicit `body_origin=canonical` through CLI, API, or MCP. Create requires no existing owner, creates one AKDB-provenance body owner, builds links and derived SAD records, and creates the matching structured ADR or UML record. Update requires exactly one owner, preserves its stable identity, replaces stale links and SAD children, and synchronizes structured ADR/UML state. SAD reconciliation recognizes simple (`D1`), descriptive (`D-DB`), and scoped numbered (`B-D1`, `C-T1`) decision identifiers; when a decision has no inline status, its summary-table status is retained as structured state. Unsafe paths, collisions, missing or ambiguous owners, reclassification, structurally unmatched UML, and exact generated-projection feedback fail closed. See [canonical document authoring sequence](UML/sequence/canonical-document-update-sequence.puml).
 
 ### 6.10 Commit-bound target publication
 
@@ -256,7 +256,7 @@ Canonical document bodies retain repository-source link semantics. Verification,
 
 **Status:** Accepted
 
-An existing imported canonical body changes only through the validated canonical-document update operation with explicit `body_origin=canonical`. The operation requires a registered repository and one body owner, preserves the owner UID, rejects exact generated-projection feedback, reconciles links and imported SAD children, and synchronizes structured ADR/UML state. See [ADR-AKDB-0004](../adr/adr-akdb-0004-update-imported-canonical-documents-by-stable-db-identity.md).
+An existing imported canonical body changes only through the validated canonical-document update operation with explicit `body_origin=canonical`. The operation requires a registered repository and one body owner, preserves the owner UID, rejects exact generated-projection feedback, reconciles links and imported SAD children, and synchronizes structured ADR/UML state. The SAD parser preserves simple, descriptive, and scoped numbered decision IDs plus table-only status values instead of collapsing scoped decisions into a synthetic wrapper. See [ADR-AKDB-0004](../adr/adr-akdb-0004-update-imported-canonical-documents-by-stable-db-identity.md).
 
 ### D-CANON-CREATE: New canonical documents are DB-owned from the first write
 
