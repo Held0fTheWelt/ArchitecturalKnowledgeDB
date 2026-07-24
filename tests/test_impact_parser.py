@@ -34,3 +34,18 @@ def test_unknown_op_raises():
 
 def test_missing_section_returns_empty():
     assert parse_impact_section("# spec\nno impact here\n") == []
+
+
+def test_remove_rule_rejected():
+    with pytest.raises(ImpactParseError):
+        parse_impact_section("## Architektur-Impact\n- remove rule R1\n")
+
+
+def test_supersede_definition_rejected():
+    with pytest.raises(ImpactParseError):
+        parse_impact_section("## Architektur-Impact\n- supersede def Foo\n")
+
+
+def test_add_rule_still_ok():
+    items = parse_impact_section("## Architektur-Impact\n- add rule R1\n")
+    assert items[0].op == "add" and items[0].target_kind == "rule"

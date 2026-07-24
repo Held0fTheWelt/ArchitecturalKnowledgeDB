@@ -64,9 +64,14 @@ def parse_impact_section(markdown: str) -> list[ChangeItemInput]:
             op = parts[0] if parts else ""
             raise ImpactParseError(f"unknown or malformed impact operation: {op}")
         kind, ref = _target(parts[1].strip())
+        op = parts[0]
+        if op in {"remove", "supersede"} and kind in {"rule", "definition"}:
+            raise ImpactParseError(
+                f"{op} of {kind} is not supported in v1 (no delete path)"
+            )
         result.append(
             ChangeItemInput(
-                op=parts[0],
+                op=op,
                 target_kind=kind,
                 target_ref=ref,
                 note=note.strip() or None,
